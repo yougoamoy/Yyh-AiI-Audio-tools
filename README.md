@@ -5,9 +5,12 @@
 ## 项目结构
 
 ```
-├── Import_Video_With_Random_Samples.lua  # Reaper视频导入脚本
-├── PhasePlant_Curve_Generator_GUI.py     # PhasePlant包络生成器(GUI版本)
-└── Generate_PhasePlant_Curves.py         # PhasePlant包络生成器(旧版脚本)
+├── Reaper Script/
+│   └── Import_Video_With_Random_Samples.lua  # Reaper视频导入脚本
+├── PhasePlant Tool/
+│   ├── PhasePlant_Curve_Generator_GUI.py     # PhasePlant包络生成器(GUI版本)
+│   └── Generate_PhasePlant_Curves.py         # PhasePlant包络生成器(旧版脚本)
+└── README.md
 ```
 
 ## 1. Reaper视频导入脚本
@@ -24,7 +27,7 @@
 
 ### 使用方法
 1. 在Reaper中: Actions → Show action list → Load ReaScript
-2. 选择 `Import_Video_With_Random_Samples.lua`
+2. 选择 `Reaper Script/Import_Video_With_Random_Samples.lua`
 3. 执行脚本并按提示操作
 
 ## 2. PhasePlant包络生成器
@@ -39,7 +42,7 @@
 
 ### 使用方法
 ```bash
-python PhasePlant_Curve_Generator_GUI.py
+python "PhasePlant Tool/PhasePlant_Curve_Generator_GUI.py"
 ```
 
 ### 参数说明
