@@ -140,31 +140,29 @@ end
 -- 但用户要求纵向连续，需要真正重排轨道
 
 local function reorderTracks(item_groups)
-    -- 收集所有涉及的轨道（去重）
-    local all_tracks = {}
+    -- 构建新轨道顺序（按分组顺序，去重）
+    local new_track_order = {}
     local track_seen = {}
     
     for _, group in ipairs(item_groups) do
         for _, entry in ipairs(group) do
             if not track_seen[entry.track] then
                 track_seen[entry.track] = true
-                table.insert(all_tracks, entry.track)
+                table.insert(new_track_order, entry.track)
             end
         end
     end
     
-    -- 构建新轨道顺序（按分组顺序）
-    local new_track_order = {}
-    for _, group in ipairs(item_groups) do
-        for _, entry in ipairs(group) do
-            table.insert(new_track_order, entry.track)
-        end
+    -- 取消所有轨道选择
+    local total_tracks = reaper.CountTracks(0)
+    for i = 0, total_tracks - 1 do
+        local t = reaper.GetTrack(0, i)
+        reaper.SetMediaTrackInfo_Value(t, "I_SELECTED", 0)
     end
     
-    -- 使用 reorderselectedtracks 需要先选中所有要重排的轨道
-    reaper.SelectAllTracks(false)
+    -- 选中要重排的轨道
     for _, track in ipairs(new_track_order) do
-        reaper.SetTrackSelected(track, true)
+        reaper.SetMediaTrackInfo_Value(track, "I_SELECTED", 1)
     end
     
     -- 构建重排映射表
