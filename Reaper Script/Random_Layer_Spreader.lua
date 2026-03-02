@@ -5,7 +5,7 @@
     功能：
     - 只处理用户选中的 media items
     - 随机分组并在时间轴上物理分离
-    - 同组轨道纵向连续排列（重新排序轨道）
+    - 同组轨道纵向连续排列（创建新轨道）
     - 不同组自动涂不同颜色
     - 每组起点添加 Marker
 --]]
@@ -96,91 +96,61 @@ local function getConfig(item_count)
     return layer_n, gap
 end
 
--- 获取选中的 items，返回 {item, track, original_track_idx} 列表
+-- 获取选中的 items
 local function getSelectedItems()
     local items = {}
     local count = reaper.CountSelectedMediaItems(0)
     
     for i = 0, count - 1 do
         local item = reaper.GetSelectedMediaItem(0, i)
-        local track = reaper.GetMediaItem_Track(item)
-        local track_idx = reaper.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER") - 1
-        
-        table.insert(items, {
-            item = item,
-            track = track,
-            original_track_idx = track_idx
-        })
+        table.insert(items, item)
     end
     
     return items
 end
 
--- 移动轨道到指定位置（通过 SetOnlyTrackSelected + ReorderSelectedTracks）
-local function moveTrackToPosition(track, new_idx)
-    -- 先选中目标轨道
-    reaper.SetOnlyTrackSelected(track)
-    -- 获取当前轨道索引
-    local current_idx = math.floor(reaper.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER") - 1)
-    
-    if current_idx == new_idx then return end
-    
-    -- 使用 ReorderSelectedTracks
-    -- 参数是一个表，表示选中轨道的新位置映射
-    -- 但这个 API 比较复杂，用另一种方式：MoveMediaItemToTrack
-    
-    -- 更简单的方法：创建新轨道，移动 item，删除旧轨道
-    -- 但这会丢失轨道设置
-    
-    -- 最佳方法：使用 SWS 的 BR_MoveTrack 但可能不可用
-    -- 让我们用 reaper.SetMediaTrackInfo_Value 设置 I_FOLDERDEPTH 配合手动重排
+-- 创建新轨道并返回
+local function createTrackAtEnd(name)
+    local track_count = reaper.CountTracks(0)
+    reaper.InsertTrackAtIndex(track_count, false)
+    local track = reaper.GetTrack(0, track_count)
+    if name then
+        reaper.GetSetMediaTrackInfo_String(track, "P_NAME", name, true)
+    end
+    return track
 end
 
--- 简化方案：直接在时间轴上对齐，轨道顺序通过颜色区分
--- 但用户要求纵向连续，需要真正重排轨道
+-- 移动 item 到目标轨道
+local function moveItemToTrack(item, target_track)
+    reaper.MoveMediaItemToTrack(item, target_track)
+end
 
-local function reorderTracks(item_groups)
-    -- 构建新轨道顺序（按分组顺序，去重）
-    local new_track_order = {}
-    local track_seen = {}
-    
-    for _, group in ipairs(item_groups) do
-        for _, entry in ipairs(group) do
-            if not track_seen[entry.track] then
-                track_seen[entry.track] = true
-                table.insert(new_track_order, entry.track)
-            end
+-- 删除空轨道
+local function removeEmptyTracks()
+    local i = reaper.CountTracks(0) - 1
+    while i >= 0 do
+        local track = reaper.GetTrack(0, i)
+        local item_count = reaper.CountTrackMediaItems(track)
+        if item_count == 0 then
+            reaper.DeleteTrack(track)
+        end
+        i = i - 1
+    end
+end
+
+-- 获取 item 的源文件名（用于轨道命名）
+local function getItemName(item)
+    local take = reaper.GetActiveTake(item)
+    if take then
+        local src = reaper.GetMediaItemTake_Source(take)
+        if src then
+            local fn = reaper.GetMediaSourceFileName(src, "")
+            -- 提取文件名（不含扩展名）
+            local name = fn:match("([^/\\]+)%.[^.]*$") or fn
+            return name
         end
     end
-    
-    -- 取消所有轨道选择
-    local total_tracks = reaper.CountTracks(0)
-    for i = 0, total_tracks - 1 do
-        local t = reaper.GetTrack(0, i)
-        reaper.SetMediaTrackInfo_Value(t, "I_SELECTED", 0)
-    end
-    
-    -- 选中要重排的轨道
-    for _, track in ipairs(new_track_order) do
-        reaper.SetMediaTrackInfo_Value(track, "I_SELECTED", 1)
-    end
-    
-    -- 构建重排映射表
-    local selected_count = reaper.CountSelectedTracks(0)
-    local track_to_order = {}
-    for i = 0, selected_count - 1 do
-        local t = reaper.GetSelectedTrack(0, i)
-        track_to_order[t] = i
-    end
-    
-    -- 新顺序索引列表
-    local new_order = {}
-    for _, track in ipairs(new_track_order) do
-        table.insert(new_order, track_to_order[track])
-    end
-    
-    -- 执行重排
-    reaper.ReorderSelectedTracks(new_order, -1)
+    return "Sample"
 end
 
 local function main()
@@ -213,40 +183,46 @@ local function main()
         table.insert(item_groups, group)
     end
     
-    -- 获取基准位置（第一个选中 item 的位置）
-    local base_position
-    do
-        local pos, _ = getItemInfo(selected_items[1].item)
-        base_position = pos
-    end
+    -- 获取基准位置
+    local base_position = reaper.GetMediaItemInfo_Value(selected_items[1], "D_POSITION")
     
     reaper.Undo_BeginBlock()
     
     local current_position = base_position
     local zone_info = {}
+    local all_new_tracks = {}
     
     for zone_idx, group in ipairs(item_groups) do
         -- 计算该组最长 item
         local max_len = 0
-        for _, entry in ipairs(group) do
-            local _, len = getItemInfo(entry.item)
+        for _, item in ipairs(group) do
+            local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
             if len > max_len then max_len = len end
         end
         
         local zone_start = current_position
         local zone_end = zone_start + max_len
-        
-        -- 移动该组所有 items
-        for _, entry in ipairs(group) do
-            local old_pos, _ = getItemInfo(entry.item)
-            local offset = old_pos - base_position
-            moveItem(entry.item, zone_start + offset)
-        end
-        
-        -- 设置轨道颜色
         local color = ZONE_COLORS[((zone_idx - 1) % #ZONE_COLORS) + 1]
-        for _, entry in ipairs(group) do
-            setTrackColor(entry.track, color[1], color[2], color[3])
+        
+        -- 为每个 item 创建新轨道并移动
+        for item_idx, item in ipairs(group) do
+            -- 创建新轨道
+            local item_name = getItemName(item)
+            local track_name = string.format("Z%d-%d %s", zone_idx, item_idx, item_name)
+            local new_track = createTrackAtEnd(track_name)
+            
+            -- 设置颜色
+            setTrackColor(new_track, color[1], color[2], color[3])
+            
+            -- 移动 item 到新轨道
+            moveItemToTrack(item, new_track)
+            
+            -- 计算新的时间位置
+            local old_pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+            local offset = old_pos - base_position
+            moveItem(item, zone_start + offset)
+            
+            table.insert(all_new_tracks, new_track)
         end
         
         -- 添加标记
@@ -263,8 +239,8 @@ local function main()
         current_position = zone_end + gap
     end
     
-    -- 重排轨道顺序（同组连续）
-    reorderTracks(item_groups)
+    -- 删除空轨道
+    removeEmptyTracks()
     
     reaper.Undo_EndBlock("Random Layer Spreader", -1)
     reaper.UpdateArrange()
