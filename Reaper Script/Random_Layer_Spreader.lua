@@ -1,268 +1,218 @@
 --[[
-    Random Layer Spreader
-    随机 Layer 分区展开工具
+Random Layer Spreader (Selected Items -> Time Zones)
 
-    功能：
-    - 只处理用户选中的 media items
-    - 随机分组并在时间轴上物理分离
-    - 同组轨道纵向连续排列（创建新轨道）
-    - 不同组自动涂不同颜色
-    - 每组起点添加 Marker
+What it does:
+- Only processes SELECTED media items
+- Randomly groups selected items into time zones
+- Places each zone as a tight vertical layer stack on N fixed "layer tracks"
+  (no gaps between layers inside a zone; items go to tracks 1..k)
+- Zones are separated in time by (max item length in that zone + gap seconds)
+- NO markers (cleaner visual)
+- Optionally colors items per zone for readability
+
+Workflow:
+1) Select scattered items anywhere in your project
+2) Put edit cursor where you want Zone 1 to start
+3) Run script, input: tracks-per-zone and gap seconds
+4) Script creates a compact folder with N layer tracks, then moves items into zones
+
+Note:
+- This script MOVES selected items to new tracks.
+- It does NOT delete original tracks.
 --]]
 
 local CONFIG = {
-    gap_seconds = 2.0,
-    default_layer = 3,
+  default_tracks_per_zone = 3,
+  default_gap_seconds = 2.0,
+  color_items_by_zone = true,
 }
 
 local ZONE_COLORS = {
-    {200, 100, 100},
-    {100, 200, 100},
-    {100, 100, 200},
-    {200, 200, 100},
-    {200, 100, 200},
-    {100, 200, 200},
-    {220, 150, 100},
-    {150, 100, 220},
+  {200, 100, 100},
+  {100, 200, 100},
+  {100, 100, 200},
+  {200, 200, 100},
+  {200, 100, 200},
+  {100, 200, 200},
+  {220, 150, 100},
+  {150, 100, 220},
 }
 
 local EXT_SECTION = "Yyh_RandomLayerSpreader"
-local KEY_LAYER_N = "layer_count"
-local KEY_GAP = "gap_seconds"
+local KEY_TRACKS_PER_ZONE = "tracks_per_zone"
+local KEY_GAP_SECONDS = "gap_seconds"
 
 local function shuffle(t)
-    math.randomseed(os.time() + math.floor(reaper.time_precise() * 1000))
-    for i = #t, 2, -1 do
-        local j = math.random(i)
-        t[i], t[j] = t[j], t[i]
-    end
+  math.randomseed(os.time() + math.floor(reaper.time_precise() * 1000))
+  for i = #t, 2, -1 do
+    local j = math.random(i)
+    t[i], t[j] = t[j], t[i]
+  end
 end
 
-local function getItemInfo(item)
-    local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
-    local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
-    return pos, len
-end
-
-local function moveItem(item, new_pos)
-    reaper.SetMediaItemInfo_Value(item, "D_POSITION", new_pos)
-end
-
-local function setTrackColor(track, r, g, b)
-    local color = reaper.ColorToNative(r, g, b)
-    reaper.SetTrackColor(track, color)
-end
-
-local function addMarker(pos, name, color_rgb)
-    local color = reaper.ColorToNative(color_rgb[1], color_rgb[2], color_rgb[3])
-    reaper.AddProjectMarker2(0, false, pos, 0, name, -1, color)
-end
-
-local function getConfig(item_count)
-    local saved_layer = reaper.GetExtState(EXT_SECTION, KEY_LAYER_N)
-    local saved_gap = reaper.GetExtState(EXT_SECTION, KEY_GAP)
-
-    local default_layer = tonumber(saved_layer) or CONFIG.default_layer
-    local default_gap = tonumber(saved_gap) or CONFIG.gap_seconds
-
-    local retval, input = reaper.GetUserInputs(
-        "Random Layer Spreader",
-        2,
-        "Tracks per zone (1-" .. item_count .. "),Gap seconds",
-        string.format("%d,%.1f", default_layer, default_gap)
-    )
-
-    if not retval then return nil, nil end
-
-    local layer_n, gap = input:match("([^,]+),([^,]+)")
-    layer_n = tonumber(layer_n)
-    gap = tonumber(gap)
-
-    if not layer_n or layer_n < 1 or layer_n > item_count then
-        reaper.ShowMessageBox(
-            string.format("Tracks per zone must be 1 to %d", item_count),
-            "Error", 0
-        )
-        return nil, nil
-    end
-
-    if not gap or gap < 0 then
-        gap = CONFIG.gap_seconds
-    end
-
-    reaper.SetExtState(EXT_SECTION, KEY_LAYER_N, tostring(layer_n), false)
-    reaper.SetExtState(EXT_SECTION, KEY_GAP, tostring(gap), false)
-
-    return layer_n, gap
-end
-
--- 获取选中的 items
 local function getSelectedItems()
-    local items = {}
-    local count = reaper.CountSelectedMediaItems(0)
-    
-    for i = 0, count - 1 do
-        local item = reaper.GetSelectedMediaItem(0, i)
-        table.insert(items, item)
-    end
-    
-    return items
+  local items = {}
+  local count = reaper.CountSelectedMediaItems(0)
+  for i = 0, count - 1 do
+    items[#items + 1] = reaper.GetSelectedMediaItem(0, i)
+  end
+  return items
 end
 
--- 创建新轨道并返回
-local function createTrackAtEnd(name)
-    local track_count = reaper.CountTracks(0)
-    reaper.InsertTrackAtIndex(track_count, false)
-    local track = reaper.GetTrack(0, track_count)
-    if name then
-        reaper.GetSetMediaTrackInfo_String(track, "P_NAME", name, true)
-    end
-    return track
+local function getItemLength(item)
+  return reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
 end
 
--- 移动 item 到目标轨道
-local function moveItemToTrack(item, target_track)
-    reaper.MoveMediaItemToTrack(item, target_track)
+local function setItemPosition(item, pos)
+  reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
 end
 
--- 删除空轨道
-local function removeEmptyTracks()
-    local i = reaper.CountTracks(0) - 1
-    while i >= 0 do
-        local track = reaper.GetTrack(0, i)
-        local item_count = reaper.CountTrackMediaItems(track)
-        if item_count == 0 then
-            reaper.DeleteTrack(track)
-        end
-        i = i - 1
-    end
+local function setItemColor(item, r, g, b)
+  local c = reaper.ColorToNative(r, g, b) | 0x1000000
+  reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", c)
 end
 
--- 获取 item 的源文件名（用于轨道命名）
-local function getItemName(item)
-    local take = reaper.GetActiveTake(item)
-    if take then
-        local src = reaper.GetMediaItemTake_Source(take)
-        if src then
-            local fn = reaper.GetMediaSourceFileName(src, "")
-            -- 提取文件名（不含扩展名）
-            local name = fn:match("([^/\\]+)%.[^.]*$") or fn
-            return name
-        end
+local function getConfig(max_items)
+  local saved_n = tonumber(reaper.GetExtState(EXT_SECTION, KEY_TRACKS_PER_ZONE))
+  local saved_gap = tonumber(reaper.GetExtState(EXT_SECTION, KEY_GAP_SECONDS))
+
+  local n = saved_n or CONFIG.default_tracks_per_zone
+  local gap = saved_gap or CONFIG.default_gap_seconds
+
+  local retval, input = reaper.GetUserInputs(
+    "Random Layer Spreader",
+    2,
+    "Tracks per zone (1-" .. max_items .. "),Gap seconds",
+    string.format("%d,%.1f", n, gap)
+  )
+  if not retval then return nil, nil end
+
+  local n_str, gap_str = input:match("([^,]+),([^,]+)")
+  n = tonumber(n_str)
+  gap = tonumber(gap_str)
+
+  if not n or n < 1 or n > max_items then
+    reaper.ShowMessageBox("Invalid Tracks per zone.", "Error", 0)
+    return nil, nil
+  end
+  if not gap or gap < 0 then gap = CONFIG.default_gap_seconds end
+
+  reaper.SetExtState(EXT_SECTION, KEY_TRACKS_PER_ZONE, tostring(n), false)
+  reaper.SetExtState(EXT_SECTION, KEY_GAP_SECONDS, tostring(gap), false)
+
+  return n, gap
+end
+
+local function trackNameExists(name)
+  local total = reaper.CountTracks(0)
+  for i = 0, total - 1 do
+    local tr = reaper.GetTrack(0, i)
+    local _, tr_name = reaper.GetTrackName(tr)
+    if tr_name == name then return true end
+  end
+  return false
+end
+
+local function makeUniqueName(base)
+  if not trackNameExists(base) then return base end
+  local i = 2
+  while true do
+    local candidate = string.format("%s (%d)", base, i)
+    if not trackNameExists(candidate) then return candidate end
+    i = i + 1
+  end
+end
+
+local function createFolderWithLayerTracks(n)
+  local total = reaper.CountTracks(0)
+
+  -- parent folder track
+  reaper.InsertTrackAtIndex(total, false)
+  local parent = reaper.GetTrack(0, total)
+  local parent_name = makeUniqueName("Layer Zones")
+  reaper.GetSetMediaTrackInfo_String(parent, "P_NAME", parent_name, true)
+  reaper.SetMediaTrackInfo_Value(parent, "I_FOLDERDEPTH", 1)
+
+  -- children
+  local layer_tracks = {}
+  for i = 1, n do
+    reaper.InsertTrackAtIndex(total + i, false)
+    local child = reaper.GetTrack(0, total + i)
+    reaper.GetSetMediaTrackInfo_String(child, "P_NAME", string.format("L%02d", i), true)
+    if i == n then
+      reaper.SetMediaTrackInfo_Value(child, "I_FOLDERDEPTH", -1)
+    else
+      reaper.SetMediaTrackInfo_Value(child, "I_FOLDERDEPTH", 0)
     end
-    return "Sample"
+    layer_tracks[i] = child
+  end
+
+  return parent, layer_tracks
 end
 
 local function main()
-    -- 获取选中的 items
-    local selected_items = getSelectedItems()
-    
-    if #selected_items == 0 then
-        reaper.ShowMessageBox("Please select some media items first", "Error", 0)
-        return
+  local items = getSelectedItems()
+  local item_count = #items
+
+  if item_count == 0 then
+    reaper.ShowMessageBox("Select some media items first.", "Random Layer Spreader", 0)
+    return
+  end
+
+  local n, gap = getConfig(item_count)
+  if not n then return end
+
+  -- randomize items
+  shuffle(items)
+
+  local zone_count = math.ceil(item_count / n)
+  local start_pos = reaper.GetCursorPosition()
+
+  reaper.Undo_BeginBlock()
+
+  -- create compact layer area
+  local _, layer_tracks = createFolderWithLayerTracks(n)
+
+  local idx = 1
+  local zone_start = start_pos
+
+  for zone = 1, zone_count do
+    -- collect this zone's items (up to n)
+    local group = {}
+    for layer = 1, n do
+      if idx > item_count then break end
+      group[#group + 1] = items[idx]
+      idx = idx + 1
     end
-    
-    local layer_n, gap = getConfig(#selected_items)
-    if not layer_n then return end
-    
-    -- 随机打乱
-    shuffle(selected_items)
-    
-    -- 分组
-    local zone_count = math.ceil(#selected_items / layer_n)
-    local item_groups = {}
-    
-    for zone_idx = 1, zone_count do
-        local start_idx = (zone_idx - 1) * layer_n + 1
-        local end_idx = math.min(start_idx + layer_n - 1, #selected_items)
-        
-        local group = {}
-        for i = start_idx, end_idx do
-            table.insert(group, selected_items[i])
-        end
-        table.insert(item_groups, group)
+
+    -- compute max length
+    local max_len = 0
+    for _, it in ipairs(group) do
+      local len = getItemLength(it)
+      if len > max_len then max_len = len end
     end
-    
-    -- 获取基准位置
-    local base_position = reaper.GetMediaItemInfo_Value(selected_items[1], "D_POSITION")
-    
-    reaper.Undo_BeginBlock()
-    
-    local current_position = base_position
-    local zone_info = {}
-    local all_new_tracks = {}
-    
-    for zone_idx, group in ipairs(item_groups) do
-        -- 计算该组最长 item
-        local max_len = 0
-        for _, item in ipairs(group) do
-            local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
-            if len > max_len then max_len = len end
-        end
-        
-        local zone_start = current_position
-        local zone_end = zone_start + max_len
-        local color = ZONE_COLORS[((zone_idx - 1) % #ZONE_COLORS) + 1]
-        
-        -- 为每个 item 创建新轨道并移动
-        for item_idx, item in ipairs(group) do
-            -- 创建新轨道
-            local item_name = getItemName(item)
-            local track_name = string.format("Z%d-%d %s", zone_idx, item_idx, item_name)
-            local new_track = createTrackAtEnd(track_name)
-            
-            -- 设置颜色
-            setTrackColor(new_track, color[1], color[2], color[3])
-            
-            -- 移动 item 到新轨道
-            moveItemToTrack(item, new_track)
-            
-            -- 计算新的时间位置
-            local old_pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
-            local offset = old_pos - base_position
-            moveItem(item, zone_start + offset)
-            
-            table.insert(all_new_tracks, new_track)
-        end
-        
-        -- 添加标记
-        local marker_name = string.format("Zone %d (%d tracks)", zone_idx, #group)
-        addMarker(zone_start, marker_name, color)
-        
-        table.insert(zone_info, {
-            zone = zone_idx,
-            start = zone_start,
-            tracks = #group,
-            max_len = max_len
-        })
-        
-        current_position = zone_end + gap
+
+    -- assign to tracks 1..k (no gaps)
+    local color = ZONE_COLORS[((zone - 1) % #ZONE_COLORS) + 1]
+    for layer = 1, #group do
+      local it = group[layer]
+      reaper.MoveMediaItemToTrack(it, layer_tracks[layer])
+      setItemPosition(it, zone_start)
+      if CONFIG.color_items_by_zone then
+        setItemColor(it, color[1], color[2], color[3])
+      end
     end
-    
-    -- 删除空轨道
-    removeEmptyTracks()
-    
-    reaper.Undo_EndBlock("Random Layer Spreader", -1)
-    reaper.UpdateArrange()
-    
-    -- 输出结果
-    local msg = string.format(
-        "Random Layer Spreader Complete\n\n" ..
-        "Selected items: %d\n" ..
-        "Tracks per zone: %d\n" ..
-        "Zones created: %d\n" ..
-        "Gap: %.1f sec\n\n",
-        #selected_items, layer_n, zone_count, gap
-    )
-    
-    for _, z in ipairs(zone_info) do
-        msg = msg .. string.format(
-            "Zone %d: %.2fs, %d tracks\n",
-            z.zone, z.start, z.tracks
-        )
-    end
-    
-    reaper.ShowConsoleMsg(msg)
+
+    zone_start = zone_start + max_len + gap
+  end
+
+  reaper.Undo_EndBlock("Random Layer Spreader (selected items -> zones)", -1)
+  reaper.UpdateArrange()
+
+  reaper.ShowConsoleMsg(string.format(
+    "Random Layer Spreader done. Selected=%d, TracksPerZone=%d, Zones=%d, Gap=%.1fs\n",
+    item_count, n, zone_count, gap
+  ))
 end
 
 main()
