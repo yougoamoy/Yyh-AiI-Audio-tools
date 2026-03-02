@@ -10,7 +10,7 @@ Core:
 - Optional item coloring by zone
 
 New in this version:
-- "Re-randomize" mode: keep existing zones/time layout, only reshuffle items within each zone
+- "Re-randomize" mode: keep existing zone start times, but RANDOMIZE ACROSS ZONES and reassign
 
 How to use:
 - Create/Spread:
@@ -364,40 +364,65 @@ local function actionRerandomize(n)
 
   local guid_map = buildItemMapByGUID()
 
+  -- Collect all items across all zones, then shuffle globally.
+  local all_items = {}
+  local missing = 0
+
   for _, z in ipairs(state.zones) do
-    local items = {}
     for _, guid in ipairs(z.guids) do
       local it = guid_map[guid]
       if it then
-        items[#items + 1] = it
+        all_items[#all_items + 1] = it
+      else
+        missing = missing + 1
+      end
+    end
+  end
+
+  if #all_items == 0 then
+    reaper.ShowMessageBox("No items found for re-randomize. Did you delete/move them?", "Random Layer Spreader", 0)
+    return
+  end
+
+  shuffle(all_items)
+
+  local cursor = 1
+
+  for _, z in ipairs(state.zones) do
+    local desired = #z.guids
+    local items = {}
+
+    for i = 1, desired do
+      if cursor > #all_items then break end
+      items[#items + 1] = all_items[cursor]
+      cursor = cursor + 1
+    end
+
+    local color = ZONE_COLORS[((z.zone - 1) % #ZONE_COLORS) + 1]
+
+    for layer = 1, #items do
+      local it = items[layer]
+      reaper.MoveMediaItemToTrack(it, layer_tracks[layer])
+      setItemPosition(it, z.start)
+      if CONFIG.color_items_by_zone then
+        setItemColor(it, color[1], color[2], color[3])
       end
     end
 
-    if #items > 0 then
-      shuffle(items)
-      local color = ZONE_COLORS[((z.zone - 1) % #ZONE_COLORS) + 1]
-
-      for layer = 1, #items do
-        local it = items[layer]
-        reaper.MoveMediaItemToTrack(it, layer_tracks[layer])
-        setItemPosition(it, z.start)
-        if CONFIG.color_items_by_zone then
-          setItemColor(it, color[1], color[2], color[3])
-        end
-      end
-
-      -- Update stored GUID order (optional, helps next rerandomize be based on current set)
-      local new_guids = {}
-      for i = 1, #items do
-        new_guids[#new_guids + 1] = getItemGUID(items[i])
-      end
-      z.guids = new_guids
+    local new_guids = {}
+    for i = 1, #items do
+      new_guids[#new_guids + 1] = getItemGUID(items[i])
     end
+    z.guids = new_guids
   end
 
   reaper.SetExtState(EXT_SECTION, KEY_STATE, serializeState(state.n, state.gap, state.zones), false)
 
-  reaper.ShowConsoleMsg("Re-randomize done. Zones kept, only reassigned layers.\n")
+  if missing > 0 then
+    reaper.ShowConsoleMsg(string.format("Re-randomize done (global). Missing items: %d\n", missing))
+  else
+    reaper.ShowConsoleMsg("Re-randomize done (global).\n")
+  end
 end
 
 -- ============================================================
