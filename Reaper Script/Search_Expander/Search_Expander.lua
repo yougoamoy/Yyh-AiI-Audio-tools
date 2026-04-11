@@ -18,7 +18,11 @@ local favorites_file = script_path .. "search_favorites.lua"
 -- ================================================================
 local ucs_ok, ucs_data = pcall(dofile, script_path .. "ucs_data.lua")
 local ucs_rev = ucs_ok and ucs_data.rev or {}
+local ucs_rev_expl = ucs_ok and ucs_data.rev_expl or {}
 local ucs_entries = ucs_ok and ucs_data.entries or {}
+
+local ucs_zh_ok, ucs_zh = pcall(dofile, script_path .. "ucszh_map.lua")
+if not ucs_zh_ok then ucs_zh = {} end
 
 local word_to_cats = {}
 local all_ucs_words = {}
@@ -94,43 +98,54 @@ local cn = {
   ["声"]="sound",
 }
 
+-- 中文 → 英文 反向查找（从 cn 表 + ucs_zh 分类表）
+local zh_to_en = {}
+for zh, en in pairs(cn) do
+  if not zh_to_en[zh] then zh_to_en[zh] = {} end
+  zh_to_en[zh][en] = true
+end
+for _, word_map in pairs(ucs_zh) do
+  for en, zh in pairs(word_map) do
+    if not zh_to_en[zh] then zh_to_en[zh] = {} end
+    zh_to_en[zh][en] = true
+  end
+end
+
 -- ================================================================
--- 同义词表（分层：sound/material/object）
+-- 英中翻译（基于 UCS v8.2，按分类存储）
 -- ================================================================
-local synonyms = {
-  gun = {sound={"shot","bang","report","discharge","fire","blast"}, material={"firearm","weapon","steel","lead","brass"}, object={"pistol","rifle","shotgun","revolver","handgun","trigger","hammer","cylinder","magazine"}},
-  gunshot = {sound={"shot","bang","report","crack","thunder","pop","boom","blast"}, material={"ammunition","cartridge","bullet","slug","pellet","charge","ball","lead","brass"}, object={"missile","projectile","shell","cannonball","dumdum","cap","round"}},
-  explosion = {sound={"blast","boom","bang","detonation","burst","eruption","blowout","pop","discharge"}, material={"fire","smoke","debris","shockwave","frag","ash"}, object={"bomb","dynamite","tnt","charge","mine","grenade","c4","torpedo"}},
-  impact = {sound={"hit","strike","crash","smash","slam","thump","blow","bang","knock","punch","wallop"}, material={"collision","shock","concussion","jolt","bump","pounding","buffet"}, object={"force","power","energy","damage","dent","mark","scar"}},
-  metal = {sound={"clang","ring","clank","clink","jangle","tinkle","chime","ping","resonance"}, material={"steel","iron","brass","aluminum","tin","copper","bronze","chrome","gold","silver"}, object={"anvil","chain","pipe","bell","cymbal","hammer","wrench","bolt","screw"}},
-  glass = {sound={"shatter","crack","tinkle","ping","chime","crunch","splinter","fracture"}, material={"crystal","shard","fragment","silica"}, object={"bottle","window","cup","vase","mirror","wine","jar"}},
-  wood = {sound={"knock","tap","creak","crack","snap","thump","rap","bang","hollow","resonance"}, material={"bamboo","oak","pine","maple","cedar","plywood","timber","lumber"}, object={"door","drum","block","table","chair","floor","cabinet","box"}},
-  stone = {sound={"grind","crack","scrape","drag","tumble","crunch","gravel"}, material={"rock","granite","marble","slate","pebble","boulder","concrete"}, object={"wall","column","statue","monument","cave","mountain"}},
-  water = {sound={"drip","splash","bubble","gurgle","trickle","drizzle","spray","pour","flow"}, material={"liquid","fluid","mist","foam","spray","rain","ice"}, object={"creek","river","ocean","lake","waterfall","fountain","pool","wave"}},
-  fire = {sound={"crackle","snap","hiss","sizzle","fizzle","roar","pop","flicker"}, material={"flame","blaze","ember","ash","coal","wood","gas","fuel"}, object={"torch","campfire","bonfire","furnace","stove","candle","match","lighter"}},
-  wind = {sound={"howl","whistle","moan","sigh","rush","gust","blast","whisper","breeze"}, material={"air","draft","current","gust","breeze","gale","storm"}, object={"tornado","hurricane","cyclone","fan","vent","window"}},
-  whoosh = {sound={"swoosh","swish","whistle","zip","whiz","whish","buzz","hum","whir"}, material={"air","wind","breeze","draft"}, object={"fly","pass","fling","throw","sweep","rush"}},
-  riser = {sound={"swell","crescendo","build","climb","rise","ascend","grow"}, material={"tension","energy","power","force","surge"}, object={"swell","wave","bloom","expand","inflate"}},
-  footstep = {sound={"walk","run","step","stomp","creep","sneak","scuff","shuffle","tramp","tread"}, material={"ground","floor","stair","path","road","trail","grass","gravel"}, object={"boot","shoe","sandal","heel","toe","barefoot"}},
-  door = {sound={"open","close","slam","creak","squeak","knock","lock","unlock","latch","hinge"}, material={"wood","metal","glass","plastic"}, object={"entrance","exit","gate","portal","cabinet","cupboard","drawer"}},
-  mechanical = {sound={"tick","click","clack","whir","grind","grate","squeak","rattle","hum","buzz"}, material={"gear","motor","engine","piston","valve","servo","pump"}, object={"clock","machine","robot","factory","engine","turbine","generator"}},
-  click = {sound={"tap","knock","snap","clack","tick","clink","pop"}, material={"button","switch","trigger","latch"}, object={"mouse","keyboard","switch","lock","camera","remote"}},
-  voice = {sound={"vocal","speech","talk","whisper","shout","scream","cry","laugh","moan","groan","sigh","breath"}, material={"breath","air","vocal cord"}, object={"person","human","speaker","singer","actor"}},
-  scream = {sound={"shriek","yell","cry","wail","howl","screech","shout","squeal","yelp"}, material={"fear","pain","horror","panic","terror"}, object={"victim","person","child","woman","man"}},
-  bird = {sound={"tweet","chirp","song","call","caw","coo","hoot","warble","squawk"}, material={"feather","wing"}, object={"eagle","hawk","owl","raven","crow","sparrow","robin","pigeon"}},
-  insect = {sound={"buzz","chirp","cricket","cicada","fly","swarm"}, material={"wing","antenna"}, object={"mosquito","bee","wasp","locust","beetle","moth","butterfly"}},
-  car = {sound={"engine","motor","rev","brake","skid","exhaust","horn","beep"}, material={"metal","rubber","glass","plastic"}, object={"tire","door","trunk","hood","bumper","exhaust pipe","steering wheel"}},
-  train = {sound={"rail","track","wheel","brake","whistle","horn","coupling"}, material={"steel","iron"}, object={"engine","carriage","platform","station","tunnel","bridge"}},
-  aircraft = {sound={"jet","engine","turbine","propeller","flyby","pass","roar"}, material={"aluminum","titanium","composite"}, object={"wing","flap","landing gear","cabin","cockpit","runway"}},
-  rain = {sound={"drizzle","pour","storm","drip","patter","thunder","rumble"}, material={"water","droplet","mist"}, object={"umbrella","roof","puddle","flood","storm"}},
-  horror = {sound={"screech","scream","dread","doom","whisper","moan","stab","slash"}, material={"blood","dark","shadow"}, object={"ghost","demon","monster","knife","chain","coffin","grave"}},
-  sci_fi = {sound={"laser","beam","warp","synth","digital","phaser","hum","buzz"}, material={"energy","plasma","electric"}, object={"robot","computer","screen","hologram","spaceship","portal"}},
-  cinematic = {sound={"boom","hit","riser","stinger","drone","pad","texture","atmosphere"}, material={"epic","massive","dramatic"}, object={"trailer","movie","film","scene","act","drama"}},
-  glitch = {sound={"error","stutter","skip","repeat","buffer","lag","freeze","crash"}, material={"digital","corrupt","broken"}, object={"computer","screen","signal","data","pixel"}},
-  noise = {sound={"white","pink","brown","static","hiss","rumble","grain","grit"}, material={"texture","sand","snow","radio"}, object={"interference","static","background"}},
-  distortion = {sound={"crush","fuzz","overdrive","saturate","clip","warp"}, material={"electric","analog","digital"}, object={"guitar","amp","pedal","speaker","signal"}},
-  reverb = {sound={"echo","delay","plate","spring","ambient","shimmer"}, material={"space","room","cave","hall","cathedral"}, object={"chamber","tank","plate","algorithm"}},
-}
+local rev_cn = {}
+for k, v in pairs(cn) do if not rev_cn[v] then rev_cn[v] = k end end
+
+local function get_cn(w, catpath)
+  if catpath and ucs_zh[catpath] and ucs_zh[catpath][w] then return ucs_zh[catpath][w] end
+  if rev_cn[w] then return rev_cn[w] end
+  for zh, en in pairs(cn) do if en == w then return zh end end
+  for _, word_map in pairs(ucs_zh) do
+    if word_map[w] then return word_map[w] end
+  end
+  return ""
+end
+
+local function format_en(list)
+  local seen = {}
+  local unique = {}
+  for _, w in ipairs(list) do if not seen[w] then seen[w] = true; table.insert(unique, w) end end
+  return table.concat(unique, "\n")
+end
+
+local function format_cn(list, catpath)
+  local seen = {}
+  local unique = {}
+  for _, w in ipairs(list) do
+    if not seen[w] then
+      seen[w] = true
+      local c = get_cn(w, catpath)
+      table.insert(unique, c ~= "" and c or "无中文")
+    end
+  end
+  return table.concat(unique, "\n")
+end
 
 -- ================================================================
 -- 个人映射
@@ -157,35 +172,140 @@ local collapsed_cats = {}
 local history_open = false
 local favorites_open = false
 local personal_mappings = load_personal()
-local show_add_mapping = false
-local mapping_source = ""
-local mapping_target = ""
-local mapping_bidir = true
 local search_cache = {}
+local zh_candidates = {}
+local selected_word = ""
+
+-- 渲染双列词列表（左英右中，各自可点击）
+local function draw_words(words, catpath, id_prefix)
+  local avail_w = reaper.ImGui_GetContentRegionAvail(ctx)
+  local col_w = math.floor(avail_w / 2) - 4
+  local cur_x = 0
+  local need_sep = false
+  for i, w in ipairs(words) do
+    local zh = get_cn(w, catpath)
+    if need_sep then
+      if cur_x + col_w * 2 + 8 <= avail_w then
+        reaper.ImGui_SameLine(ctx, 0, 8)
+        cur_x = cur_x + 8
+      else
+        cur_x = 0
+      end
+    end
+    -- 英文
+    local en_w = reaper.ImGui_CalcTextSize(ctx, w) + 16
+    if reaper.ImGui_Selectable(ctx, w .. "##e" .. id_prefix .. i, selected_word == w,
+        reaper.ImGui_SelectableFlags_AllowDoubleClick(), en_w) then
+      selected_word = w
+      if reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
+        input_buf = w; prev_input = ""; zh_candidates = {}
+      end
+    end
+    cur_x = cur_x + en_w
+    -- 中文
+    if zh ~= "" then
+      reaper.ImGui_SameLine(ctx, 0, 2)
+      local cn_w = reaper.ImGui_CalcTextSize(ctx, zh) + 16
+      if reaper.ImGui_Selectable(ctx, zh .. "##c" .. id_prefix .. i, selected_word == zh,
+          reaper.ImGui_SelectableFlags_AllowDoubleClick(), cn_w) then
+        selected_word = zh
+        if reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
+          input_buf = zh; prev_input = ""; zh_candidates = {}
+        end
+      end
+      cur_x = cur_x + cn_w + 2
+    end
+    need_sep = true
+  end
+end
+
+-- 搜索历史导航
+local nav_history = {}
+local nav_pos = 0
+
+local function nav_push(query)
+  if query == "" then return end
+  if nav_history[nav_pos] == query then return end
+  -- 截断前进历史
+  while #nav_history > nav_pos do table.remove(nav_history) end
+  table.insert(nav_history, query)
+  nav_pos = #nav_history
+end
+
+local function do_search(query)
+  input_buf = query
+  prev_input = ""
+  zh_candidates = {}
+end
+
+-- 结果文本缓冲（英文和中文分开）
+local buf_per_en = ""
+local buf_per_cn = ""
+local ucs_en_bufs = {}
+local ucs_cn_bufs = {}
 
 -- 条件构建器状态
 local show_builder = false
 local builder_conditions = {{text="", relation=0}}  -- {text, relation: 0=且,1=或,2=非}
-local builder_and_groups = {}
-local builder_or_groups = {}
-local builder_not_terms = {}
-local builder_query = ""
 
 -- ================================================================
 -- 分词 + 短语优先匹配
 -- ================================================================
+local all_ucs_phrases = {}
+if ucs_ok then
+  for phrase in pairs(ucs_rev) do all_ucs_phrases[phrase:lower()] = true end
+end
+
+local function is_chinese(s)
+  return s:match("[\228-\233][\128-\191][\128-\191]") ~= nil
+end
+
 local function tokenize(input)
   local terms = {}
   local remaining = input
+
   for phrase, en in pairs(phrase_cn) do
     if remaining:find(phrase, 1, true) then
       table.insert(terms, en)
       remaining = remaining:gsub(phrase, " ")
     end
   end
-  for word in remaining:gmatch("[^,，%s/]+") do
-    local w = word:lower():gsub("^%s+",""):gsub("%s+$","")
-    if w ~= "" then table.insert(terms, cn[w] or w) end
+
+  for segment in remaining:gmatch("[^,，/]+") do
+    local seg = segment:lower():gsub("^%s+",""):gsub("%s+$","")
+    if seg == "" then goto continue end
+
+    if is_chinese(seg) then
+      local found_en = {}
+      -- 精确匹配 zh_to_en
+      if zh_to_en[seg] then
+        for en in pairs(zh_to_en[seg]) do found_en[en] = true end
+      end
+      -- 按、或空格分割后逐词精确匹配
+      for zh_key, en_set in pairs(zh_to_en) do
+        for part in zh_key:gmatch("[^、,%s/]+") do
+          if part == seg then
+            for en in pairs(en_set) do found_en[en] = true end
+          end
+        end
+      end
+      for en in pairs(found_en) do table.insert(terms, en) end
+      if #terms == 0 then table.insert(terms, seg) end
+    elseif all_ucs_phrases[seg] then
+      table.insert(terms, seg)
+    else
+      for word in segment:gmatch("%S+") do
+        local w = word:lower():gsub("^%s+",""):gsub("%s+$","")
+        if w ~= "" then
+          if all_ucs_phrases[w] then
+            table.insert(terms, w)
+          else
+            table.insert(terms, cn[w] or w)
+          end
+        end
+      end
+    end
+    ::continue::
   end
   return terms
 end
@@ -205,12 +325,54 @@ local function find_prefix_matches(prefix)
 end
 
 -- ================================================================
+-- 词干变体
+-- ================================================================
+local function get_variants(w)
+  local set = {[w] = true}
+  local list = {w}
+  local function add(v)
+    if not set[v] and #v >= 3 then set[v] = true; table.insert(list, v) end
+  end
+  -- 去后缀 → 加其他后缀
+  if w:match("ing$") then
+    local base = w:sub(1, -4)
+    add(base); add(base .. "e"); add(base .. "ed"); add(base .. "s"); add(base .. "er")
+    if #base >= 2 then add(base:sub(1, -2) .. "e") end
+  end
+  if w:match("ed$") then
+    local base = w:sub(1, -3)
+    add(base); add(base .. "e"); add(base .. "ing"); add(base .. "s"); add(base .. "er")
+    add(w:sub(1, -2))  -- doubled consonant: sliced → slic
+  end
+  if w:match("er$") then
+    local base = w:sub(1, -3)
+    add(base); add(base .. "ing"); add(base .. "ed"); add(base .. "s")
+  end
+  if w:match("s$") and not w:match("ss$") then
+    local base = w:sub(1, -2)
+    add(base); add(base .. "ing"); add(base .. "ed"); add(base .. "er")
+  end
+  if w:match("tion$") then
+    local base = w:sub(1, -4)
+    add(base); add(base .. "te"); add(base .. "ted"); add(base .. "ting")
+  end
+  if w:match("ly$") then
+    add(w:sub(1, -3))
+  end
+  -- 加后缀
+  if not w:match("e$") then add(w .. "ing") else add(w:sub(1,-2) .. "ing") end
+  if not w:match("e$") then add(w .. "ed") else add(w:sub(1,-2) .. "ed") end
+  add(w .. "s"); add(w .. "er"); add(w .. "tion")
+  return list
+end
+
+-- ================================================================
 -- 核心扩展
 -- ================================================================
-local function expand(input)
+function expand(input)
   if search_cache[input] then return search_cache[input].result, search_cache[input].no_match end
   local terms = tokenize(input)
-  local result = {syn={}, mat={}, obj={}, personal={}, ucs={}}
+  local result = {personal={}, ucs={}}
   local seen = {}
   local no_match = {}
 
@@ -220,12 +382,6 @@ local function expand(input)
 
   for _, term in ipairs(terms) do
     local found = false
-    if synonyms[term] then
-      found = true
-      for _, w in ipairs(synonyms[term].sound or {}) do add(result.syn, w) end
-      for _, w in ipairs(synonyms[term].material or {}) do add(result.mat, w) end
-      for _, w in ipairs(synonyms[term].object or {}) do add(result.obj, w) end
-    end
     local pm = personal_mappings[term] or personal_mappings[input]
     if pm then
       found = true
@@ -233,10 +389,13 @@ local function expand(input)
         for sub_w in w:gmatch("%S+") do add(result.personal, sub_w) end
       end
     end
-    local cats = ucs_rev[term] or word_to_cats[term]
-    if cats then
-      found = true
-      for _, catpath in ipairs(cats) do
+    for _, variant in ipairs(get_variants(term)) do
+      local cats_set = {}
+      for _, src in ipairs({ucs_rev[variant], ucs_rev_expl[variant], word_to_cats[variant]}) do
+        if src then for _, cp in ipairs(src) do cats_set[cp] = true end end
+      end
+      for catpath in pairs(cats_set) do
+        found = true
         if not result.ucs[catpath] then
           result.ucs[catpath] = {}
           if ucs_entries[catpath] then
@@ -254,19 +413,47 @@ local function expand(input)
   return result, no_match
 end
 
+local function expand_terms(terms)
+  local result = {personal={}, ucs={}}
+  local seen = {}
+  local function add(list, w)
+    if not seen[w] then seen[w] = true; table.insert(list, w) end
+  end
+  for _, term in ipairs(terms) do
+    local pm = personal_mappings[term]
+    if pm then
+      for _, w in ipairs(pm) do
+        for sub_w in w:gmatch("%S+") do add(result.personal, sub_w) end
+      end
+    end
+    local cats = ucs_rev[term] or word_to_cats[term]
+    if cats then
+      for _, catpath in ipairs(cats) do
+        if not result.ucs[catpath] then
+          result.ucs[catpath] = {}
+          if ucs_entries[catpath] then
+            for _, w in ipairs(ucs_entries[catpath]) do
+              if not seen[w] then seen[w] = true; table.insert(result.ucs[catpath], w) end
+            end
+          end
+        end
+      end
+    end
+  end
+  return result
+end
+
 -- ================================================================
 -- 应用条件到基础结果
 -- ================================================================
 local function apply_conditions(base, conditions)
   if not base then return nil end
-  -- 检查是否有有效条件
   local has_conditions = false
   for _, cond in ipairs(conditions) do
     if cond.text ~= "" then has_conditions = true; break end
   end
   if not has_conditions then return base end
 
-  -- 收集条件扩展（按关系分组，保留分类信息）
   local and_list, or_expanded_list, not_set = {}, {}, {}
   for _, cond in ipairs(conditions) do
     if cond.text ~= "" then
@@ -277,44 +464,38 @@ local function apply_conditions(base, conditions)
         table.insert(or_expanded_list, expanded)
       else
         local function add_not(list) for _, w in ipairs(list) do not_set[w] = true end end
-        add_not(expanded.syn); add_not(expanded.mat); add_not(expanded.obj); add_not(expanded.personal)
+        add_not(expanded.personal)
         for _, cw in pairs(expanded.ucs) do add_not(cw) end
       end
     end
   end
 
-  -- AND 过滤：取所有 AND 条件扩展词的交集
   local and_pass = {}
   if #and_list > 0 then
     local first = {}
     local function add_first(list) for _, w in ipairs(list) do first[w] = true end end
-    add_first(and_list[1].syn); add_first(and_list[1].mat); add_first(and_list[1].obj); add_first(and_list[1].personal)
+    add_first(and_list[1].personal)
     for _, cw in pairs(and_list[1].ucs) do add_first(cw) end
     for w in pairs(first) do and_pass[w] = true end
     for i = 2, #and_list do
       local cur = {}
       local function add_cur(list) for _, w in ipairs(list) do cur[w] = true end end
-      add_cur(and_list[i].syn); add_cur(and_list[i].mat); add_cur(and_list[i].obj); add_cur(and_list[i].personal)
+      add_cur(and_list[i].personal)
       for _, cw in pairs(and_list[i].ucs) do add_cur(cw) end
       for w in pairs(and_pass) do if not cur[w] then and_pass[w] = nil end end
     end
   end
 
-  -- 构建最终结果
-  local final_syn, final_mat, final_obj, final_personal = {}, {}, {}, {}
+  local final_personal = {}
   local final_ucs = {}
   local seen = {}
 
-  -- 基础结果过滤（AND + NOT）
   local function add_base(list, w)
     if seen[w] then return end
     if #and_list > 0 and not and_pass[w] then return end
     if not_set[w] then return end
     seen[w] = true; table.insert(list, w)
   end
-  for _, w in ipairs(base.syn) do add_base(final_syn, w) end
-  for _, w in ipairs(base.mat) do add_base(final_mat, w) end
-  for _, w in ipairs(base.obj) do add_base(final_obj, w) end
   for _, w in ipairs(base.personal) do add_base(final_personal, w) end
   for cat, cw in pairs(base.ucs) do
     for _, w in ipairs(cw) do
@@ -326,16 +507,12 @@ local function apply_conditions(base, conditions)
     end
   end
 
-  -- OR 追加（仅 NOT 过滤，不走 AND）
   local function add_or(list, w)
     if seen[w] then return end
     if not_set[w] then return end
     seen[w] = true; table.insert(list, w)
   end
   for _, expanded in ipairs(or_expanded_list) do
-    for _, w in ipairs(expanded.syn) do add_or(final_syn, w) end
-    for _, w in ipairs(expanded.mat) do add_or(final_mat, w) end
-    for _, w in ipairs(expanded.obj) do add_or(final_obj, w) end
     for _, w in ipairs(expanded.personal) do add_or(final_personal, w) end
     for cat, cw in pairs(expanded.ucs) do
       for _, w in ipairs(cw) do
@@ -348,7 +525,22 @@ local function apply_conditions(base, conditions)
     end
   end
 
-  return {syn=final_syn, mat=final_mat, obj=final_obj, personal=final_personal, ucs=final_ucs}
+  return {personal=final_personal, ucs=final_ucs}
+end
+
+-- ================================================================
+-- 更新结果缓冲
+-- ================================================================
+local function update_result_bufs()
+  if not results then return end
+  buf_per_en = format_en(results.personal)
+  buf_per_cn = format_cn(results.personal)
+  ucs_en_bufs = {}
+  ucs_cn_bufs = {}
+  for catpath, cat_words in pairs(results.ucs) do
+    ucs_en_bufs[catpath] = format_en(cat_words)
+    ucs_cn_bufs[catpath] = format_cn(cat_words, catpath)
+  end
 end
 
 -- ================================================================
@@ -368,23 +560,168 @@ function loop()
     
     reaper.ImGui_Text(ctx, "输入关键词：")
     reaper.ImGui_SameLine(ctx)
-    reaper.ImGui_SetNextItemWidth(ctx, -230)
+    reaper.ImGui_SetNextItemWidth(ctx, -170)
     local changed, new_val = reaper.ImGui_InputText(ctx, "##input", input_buf, 256)
     if changed and new_val ~= input_buf then input_buf = new_val end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "收藏", 40, 22) and input_buf ~= "" then
+      favorites[input_buf] = true
+      save_favorites_map(favorites_file, favorites)
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "历史", 40, 22) then history_open = not history_open; favorites_open = false end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "收藏夹", 50, 22) then favorites_open = not favorites_open; history_open = false end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "清除", 40, 22) then
+      input_buf = ""
+      prev_input = ""
+      base_results = nil
+      results = nil
+      zh_candidates = {}
+      nav_history = {}
+      nav_pos = 0
+      buf_per_en, buf_per_cn = "", ""
+      ucs_en_bufs, ucs_cn_bufs = {}, {}
+      suggestions = nil
+      builder_conditions = {{text="", relation=0}}
+      collapsed_cats = {}
+      history_open = false
+      favorites_open = false
+    end
     if input_buf ~= prev_input then
       prev_input = input_buf
       if input_buf ~= "" then
-        local no_match
-        base_results, no_match = expand(input_buf)
-        results = apply_conditions(base_results, builder_conditions)
-        suggestions = {}
-        for _, term in ipairs(no_match) do
-          local matches = find_prefix_matches(term)
-          if #matches > 0 then suggestions[term] = matches end
+        local input_clean = input_buf:gsub("^%s+",""):gsub("%s+$","")
+        local is_cn_input = input_clean:match("[\228-\233][\128-\191][\128-\191]") ~= nil
+        if is_cn_input then
+          -- 中文输入：收集候选英文词
+          local found_en = {}
+          -- 直接精确匹配
+          if zh_to_en[input_clean] then
+            for en in pairs(zh_to_en[input_clean]) do found_en[en] = true end
+          end
+          -- 分割匹配 + 子串匹配
+          for zh_key, en_set in pairs(zh_to_en) do
+            for part in zh_key:gmatch("[^、,%s/]+") do
+              if part == input_clean or part:find(input_clean, 1, true) then
+                for en in pairs(en_set) do found_en[en] = true end
+              end
+            end
+          end
+          -- 兜底：直接扫描所有ucs_zh和cn表
+          if not next(found_en) then
+            for _, word_map in pairs(ucs_zh) do
+              for en, zh in pairs(word_map) do
+                if zh == input_clean or zh:find(input_clean, 1, true) then
+                  found_en[en] = true
+                end
+              end
+            end
+            for zh, en in pairs(cn) do
+              if zh == input_clean or zh:find(input_clean, 1, true) then
+                found_en[en] = true
+              end
+            end
+          end
+          -- 调试
+          if not next(found_en) then
+            local test = zh_to_en[input_clean]
+            local has = test and "yes" or "no"
+            local ucs_count = 0
+            for _ in pairs(ucs_zh) do ucs_count = ucs_count + 1 end
+            local zh_count = 0
+            for _ in pairs(zh_to_en) do zh_count = zh_count + 1 end
+            reaper.ImGui_TextColored(ctx, 0xFFFF0000, "'"..input_clean.."' zh_to_en="..has.." ucs_zh="..ucs_count.." zh2en="..zh_count)
+          end
+          zh_candidates = {}
+          for en in pairs(found_en) do table.insert(zh_candidates, en) end
+          table.sort(zh_candidates)
+          if #zh_candidates > 0 then
+            base_results = expand_terms(zh_candidates)
+            results = apply_conditions(base_results, builder_conditions)
+            update_result_bufs()
+            nav_push(input_buf)
+          else
+            base_results = nil; results = nil
+            buf_per_en, buf_per_cn = "", ""
+            ucs_en_bufs, ucs_cn_bufs = {}, {}
+          end
+          suggestions = nil
+        else
+          -- 英文输入：直接搜索
+          zh_candidates = {}
+          local no_match
+          base_results, no_match = expand(input_buf)
+          results = apply_conditions(base_results, builder_conditions)
+          update_result_bufs()
+          nav_push(input_buf)
+          suggestions = {}
+          for _, term in ipairs(no_match) do
+            local matches = find_prefix_matches(term)
+            if #matches > 0 then suggestions[term] = matches end
+          end
         end
       else
+        zh_candidates = {}
         results = nil
+        buf_per_en, buf_per_cn = "", ""
+        ucs_en_bufs, ucs_cn_bufs = {}, {}
         suggestions = nil
+      end
+    end
+
+    -- 中文候选词显示
+    if #zh_candidates > 0 then
+      reaper.ImGui_TextColored(ctx, 0xFF88CC88, "匹配词汇（点击删除）：")
+      -- 计算所需行数来确定高度
+      local win_w = reaper.ImGui_GetContentRegionAvail(ctx)
+      local line_h = 22
+      local cur_x = 0
+      local line_count = 1
+      for i = 1, #zh_candidates do
+        local w = zh_candidates[i]
+        local zh = get_cn(w)
+        local label = zh ~= "" and (w .. " " .. zh) or w
+        local item_w = reaper.ImGui_CalcTextSize(ctx, "X " .. label) + 24
+        if cur_x + item_w > win_w and cur_x > 0 then
+          line_count = line_count + 1
+          cur_x = item_w
+        else
+          cur_x = cur_x + item_w
+        end
+      end
+      local child_h = math.min(line_count * line_h, 120)
+      reaper.ImGui_BeginChild(ctx, "##cands", 0, child_h)
+      local changed_cands = false
+      cur_x = 0
+      for i = #zh_candidates, 1, -1 do
+        local w = zh_candidates[i]
+        local zh = get_cn(w)
+        local label = zh ~= "" and (w .. " " .. zh) or w
+        local item_w = reaper.ImGui_CalcTextSize(ctx, "X " .. label) + 24
+        if cur_x + item_w > win_w and cur_x > 0 then
+          cur_x = 0
+        elseif cur_x > 0 then
+          reaper.ImGui_SameLine(ctx, 0, 4)
+        end
+        if reaper.ImGui_SmallButton(ctx, "X##c" .. i) then
+          table.remove(zh_candidates, i)
+          changed_cands = true
+        end
+        reaper.ImGui_SameLine(ctx, 0, 2)
+        reaper.ImGui_Text(ctx, label)
+        cur_x = cur_x + item_w
+      end
+      reaper.ImGui_EndChild(ctx)
+      if changed_cands and #zh_candidates > 0 then
+        base_results = expand_terms(zh_candidates)
+        results = apply_conditions(base_results, builder_conditions)
+        update_result_bufs()
+      elseif changed_cands then
+        base_results = nil; results = nil
+        buf_per_en, buf_per_cn = "", ""
+        ucs_en_bufs, ucs_cn_bufs = {}, {}
       end
     end
 
@@ -402,67 +739,25 @@ function loop()
       end
     end
 
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "收藏", 40, 22) and input_buf ~= "" then
-      favorites[input_buf] = true
-      save_favorites_map(favorites_file, favorites)
+    -- 导航按钮行
+    local can_back = nav_pos > 1
+    local can_fwd = nav_pos < #nav_history
+    if not can_back then reaper.ImGui_BeginDisabled(ctx) end
+    if reaper.ImGui_Button(ctx, "<", 28, 22) then
+      nav_pos = nav_pos - 1
+      do_search(nav_history[nav_pos])
     end
-
+    if not can_back then reaper.ImGui_EndDisabled(ctx) end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "添加", 40, 22) then
-      show_add_mapping = not show_add_mapping
-      mapping_source = input_buf
-      mapping_target = ""
+    if not can_fwd then reaper.ImGui_BeginDisabled(ctx) end
+    if reaper.ImGui_Button(ctx, ">", 28, 22) then
+      nav_pos = nav_pos + 1
+      do_search(nav_history[nav_pos])
     end
-
+    if not can_fwd then reaper.ImGui_EndDisabled(ctx) end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "历史", 40, 22) then history_open = not history_open; favorites_open = false end
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "收藏夹", 50, 22) then favorites_open = not favorites_open; history_open = false end
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "清除", 40, 22) then
-      input_buf = ""
-      prev_input = ""
-      base_results = nil
-      results = nil
-      suggestions = nil
-      builder_conditions = {{text="", relation=0}}
-      builder_query = ""
-      collapsed_cats = {}
-      history_open = false
-      favorites_open = false
-      show_add_mapping = false
-    end
-
-    if show_add_mapping then
-      reaper.ImGui_Separator(ctx)
-      reaper.ImGui_TextColored(ctx, 0xFFFFAA00, "添加个人映射（支持词组）：")
-      reaper.ImGui_Text(ctx, "源词：")
-      reaper.ImGui_SameLine(ctx)
-      reaper.ImGui_SetNextItemWidth(ctx, 150)
-      local s_changed, s_val = reaper.ImGui_InputText(ctx, "##src", mapping_source, 128)
-      if s_changed then mapping_source = s_val end
-      reaper.ImGui_SameLine(ctx)
-      reaper.ImGui_Text(ctx, "→ 目标词组：")
-      reaper.ImGui_SameLine(ctx)
-      reaper.ImGui_SetNextItemWidth(ctx, 200)
-      local t_changed, t_val = reaper.ImGui_InputText(ctx, "##tgt", mapping_target, 256)
-      if t_changed then mapping_target = t_val end
-      reaper.ImGui_SameLine(ctx)
-      local bidir_changed, bidir_val = reaper.ImGui_Checkbox(ctx, "双向映射##bidir", mapping_bidir)
-      if bidir_changed then mapping_bidir = bidir_val end
-      reaper.ImGui_SameLine(ctx)
-      if reaper.ImGui_Button(ctx, "保存") and mapping_source ~= "" and mapping_target ~= "" then
-        if not personal_mappings[mapping_source] then personal_mappings[mapping_source] = {} end
-        table.insert(personal_mappings[mapping_source], mapping_target)
-        if mapping_bidir then
-          if not personal_mappings[mapping_target] then personal_mappings[mapping_target] = {} end
-          table.insert(personal_mappings[mapping_target], mapping_source)
-        end
-        save_personal(personal_mappings)
-        show_add_mapping = false
-      end
-      reaper.ImGui_TextColored(ctx, 0xFF888888, "例：电磁炮充能 → sci_fi energy riser")
+    if reaper.ImGui_Button(ctx, "添加条件", 70, 22) then
+      show_builder = not show_builder
     end
 
     if history_open and #history > 0 then
@@ -491,12 +786,6 @@ function loop()
       end
     end
 
-    reaper.ImGui_Separator(ctx)
-
-    if reaper.ImGui_Button(ctx, "添加条件", 80, 22) then
-      show_builder = not show_builder
-    end
-
     if show_builder then
       for i, cond in ipairs(builder_conditions) do
         reaper.ImGui_PushID(ctx, i)
@@ -508,20 +797,21 @@ function loop()
         
         if reaper.ImGui_SmallButton(ctx, "切换") then
           builder_conditions[i].relation = (cond.relation + 1) % 3
-          if base_results then results = apply_conditions(base_results, builder_conditions) end
+          if base_results then results = apply_conditions(base_results, builder_conditions); update_result_bufs() end
         end
         
         reaper.ImGui_SameLine(ctx)
         reaper.ImGui_SetNextItemWidth(ctx, 200)
         local txt_changed, txt_val = reaper.ImGui_InputText(ctx, "##txt", cond.text, 256)
-        if txt_changed then
-          if base_results then results = apply_conditions(base_results, builder_conditions) end
+        if txt_changed and txt_val ~= cond.text then
+          builder_conditions[i].text = txt_val
+          if base_results then results = apply_conditions(base_results, builder_conditions); update_result_bufs() end
         end
         
         reaper.ImGui_SameLine(ctx)
         if reaper.ImGui_SmallButton(ctx, "✕") then
           table.remove(builder_conditions, i)
-          if base_results then results = apply_conditions(base_results, builder_conditions) end
+          if base_results then results = apply_conditions(base_results, builder_conditions); update_result_bufs() end
           reaper.ImGui_PopID(ctx)
           break
         end
@@ -531,75 +821,6 @@ function loop()
       
       if reaper.ImGui_SmallButton(ctx, "+ 添加条件") then
         table.insert(builder_conditions, {text="", relation=0})
-      end
-      
-      reaper.ImGui_SameLine(ctx)
-      if reaper.ImGui_SmallButton(ctx, "生成查询串") then
-        builder_and_groups = {}
-        builder_or_groups = {}
-        builder_not_terms = {}
-        
-        for _, cond in ipairs(builder_conditions) do
-          if cond.text ~= "" then
-            local expanded = expand(cond.text)
-            local all_expanded = {}
-            for _, w in ipairs(expanded.syn) do table.insert(all_expanded, w) end
-            for _, w in ipairs(expanded.mat) do table.insert(all_expanded, w) end
-            for _, w in ipairs(expanded.obj) do table.insert(all_expanded, w) end
-            for _, w in ipairs(expanded.personal) do table.insert(all_expanded, w) end
-            for _, cat_words in pairs(expanded.ucs) do
-              for _, w in ipairs(cat_words) do table.insert(all_expanded, w) end
-            end
-            
-            if cond.relation == 0 then
-              table.insert(builder_and_groups, all_expanded)
-            elseif cond.relation == 1 then
-              table.insert(builder_or_groups, all_expanded)
-            else
-              for _, w in ipairs(all_expanded) do
-                table.insert(builder_not_terms, w)
-              end
-            end
-          end
-        end
-        
-        local parts = {}
-        for _, group in ipairs(builder_and_groups) do
-          if #group > 0 then
-            if #group == 1 then table.insert(parts, group[1])
-            else table.insert(parts, "(" .. table.concat(group, ", ") .. ")") end
-          end
-        end
-        
-        if #builder_or_groups > 0 then
-          local or_parts = {}
-          for _, group in ipairs(builder_or_groups) do
-            if #group > 0 then
-              if #group == 1 then table.insert(or_parts, group[1])
-              else table.insert(or_parts, "(" .. table.concat(group, ", ") .. ")") end
-            end
-          end
-          if #or_parts > 0 then
-            if #parts > 0 then table.insert(parts, ", " .. table.concat(or_parts, ", "))
-            else table.insert(parts, table.concat(or_parts, ", ")) end
-          end
-        end
-        
-        for _, w in ipairs(builder_not_terms) do
-          table.insert(parts, "-" .. w)
-        end
-        
-        builder_query = table.concat(parts, " ")
-      end
-      
-      if builder_query ~= "" then
-        reaper.ImGui_Separator(ctx)
-        reaper.ImGui_TextColored(ctx, 0xFFFFAA00, "Soundminer 查询串：")
-        reaper.ImGui_SameLine(ctx)
-        if reaper.ImGui_SmallButton(ctx, "复制查询串") then
-          reaper.ImGui_SetClipboardText(ctx, builder_query)
-        end
-        reaper.ImGui_TextWrapped(ctx, builder_query)
       end
     end
 
@@ -618,6 +839,7 @@ function loop()
             local no_match
             base_results, no_match = expand(input_buf)
             results = apply_conditions(base_results, builder_conditions)
+            update_result_bufs()
             suggestions = nil
             break
           end
@@ -628,54 +850,10 @@ function loop()
     end
 
     if results then
-      local all_words = {}
-      for _, w in ipairs(results.syn) do table.insert(all_words, w) end
-      for _, w in ipairs(results.mat) do table.insert(all_words, w) end
-      for _, w in ipairs(results.obj) do table.insert(all_words, w) end
-      for _, w in ipairs(results.personal) do table.insert(all_words, w) end
-      for _, cw in pairs(results.ucs) do
-        for _, w in ipairs(cw) do table.insert(all_words, w) end
-      end
-
-      if #all_words > 0 then
-        reaper.ImGui_TextColored(ctx, 0xFF8888CC, "结果 (" .. #all_words .. " 词)")
-        reaper.ImGui_SameLine(ctx)
-        if reaper.ImGui_SmallButton(ctx, "复制全部") then
-          reaper.ImGui_SetClipboardText(ctx, table.concat(all_words, ", "))
-        end
-      end
-
       reaper.ImGui_BeginChild(ctx, "##results", 0, 0)
-      
-      if #results.syn > 0 then
-        reaper.ImGui_TextColored(ctx, 0xFF66CC66, "声音描述 (" .. #results.syn .. ")")
-        reaper.ImGui_SameLine(ctx)
-        if reaper.ImGui_SmallButton(ctx, "复制##syn") then reaper.ImGui_SetClipboardText(ctx, table.concat(results.syn, ", ")) end
-        reaper.ImGui_TextWrapped(ctx, table.concat(results.syn, ", "))
-        reaper.ImGui_Spacing(ctx)
-      end
-
-      if #results.mat > 0 then
-        reaper.ImGui_TextColored(ctx, 0xFF66CCCC, "材质属性 (" .. #results.mat .. ")")
-        reaper.ImGui_SameLine(ctx)
-        if reaper.ImGui_SmallButton(ctx, "复制##mat") then reaper.ImGui_SetClipboardText(ctx, table.concat(results.mat, ", ")) end
-        reaper.ImGui_TextWrapped(ctx, table.concat(results.mat, ", "))
-        reaper.ImGui_Spacing(ctx)
-      end
-
-      if #results.obj > 0 then
-        reaper.ImGui_TextColored(ctx, 0xFFCC66CC, "发声物体 (" .. #results.obj .. ")")
-        reaper.ImGui_SameLine(ctx)
-        if reaper.ImGui_SmallButton(ctx, "复制##obj") then reaper.ImGui_SetClipboardText(ctx, table.concat(results.obj, ", ")) end
-        reaper.ImGui_TextWrapped(ctx, table.concat(results.obj, ", "))
-        reaper.ImGui_Spacing(ctx)
-      end
-
       if #results.personal > 0 then
         reaper.ImGui_TextColored(ctx, 0xFFFFAA00, "个人经验 (" .. #results.personal .. ")")
-        reaper.ImGui_SameLine(ctx)
-        if reaper.ImGui_SmallButton(ctx, "复制##per") then reaper.ImGui_SetClipboardText(ctx, table.concat(results.personal, ", ")) end
-        reaper.ImGui_TextWrapped(ctx, table.concat(results.personal, ", "))
+        draw_words(results.personal, nil, "per")
         reaper.ImGui_Spacing(ctx)
       end
 
@@ -683,17 +861,10 @@ function loop()
       for _ in pairs(results.ucs) do ucs_count = ucs_count + 1 end
       if ucs_count > 0 then
         reaper.ImGui_TextColored(ctx, 0xFF8888CC, "UCS分类 (" .. ucs_count .. ")")
-        reaper.ImGui_SameLine(ctx)
-        if reaper.ImGui_SmallButton(ctx, "复制##ucs") then
-          local ucs_words = {}
-          for _, cw in pairs(results.ucs) do
-            for _, w in ipairs(cw) do table.insert(ucs_words, w) end
-          end
-          reaper.ImGui_SetClipboardText(ctx, table.concat(ucs_words, ", "))
-        end
-        
+
         for catpath, cat_words in pairs(results.ucs) do
           if #cat_words > 0 then
+            if collapsed_cats[catpath] == nil then collapsed_cats[catpath] = true end
             local collapsed = collapsed_cats[catpath]
             local arrow = collapsed and ">" or "v"
             if reaper.ImGui_SmallButton(ctx, arrow .. "##u" .. catpath) then
@@ -704,11 +875,27 @@ function loop()
             reaper.ImGui_TextColored(ctx, 0xFFAAAA88, catpath .. " (" .. #cat_words .. ")")
             if not collapsed then
               reaper.ImGui_Indent(ctx)
-              reaper.ImGui_TextWrapped(ctx, table.concat(cat_words, ", "))
+              draw_words(cat_words, catpath, catpath)
               reaper.ImGui_Unindent(ctx)
               reaper.ImGui_Spacing(ctx)
             end
           end
+        end
+      end
+
+      -- 复制选中词按钮
+      if selected_word ~= "" then
+        reaper.ImGui_Separator(ctx)
+        reaper.ImGui_TextColored(ctx, 0xFF888888, "已选中: " .. selected_word)
+        reaper.ImGui_SameLine(ctx)
+        if reaper.ImGui_SmallButton(ctx, "复制") then
+          reaper.ImGui_SetClipboardText(ctx, selected_word)
+        end
+        reaper.ImGui_SameLine(ctx)
+        if reaper.ImGui_SmallButton(ctx, "搜索此词") then
+          input_buf = selected_word
+          prev_input = ""
+          zh_candidates = {}
         end
       end
 
