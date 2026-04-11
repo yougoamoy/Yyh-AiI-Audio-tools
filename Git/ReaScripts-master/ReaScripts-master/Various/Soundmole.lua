@@ -1,0 +1,29 @@
+-- @description Soundmole
+-- @author zaibuyidao
+-- @version 1.0.160
+-- @changelog
+--   Added dynamic section start and end guide lines and reference blocks that follow track changes
+--   Fixed an issue where inserting sections by dragging waveform selections into REAPER behaved incorrectly
+--   Fixed an offset issue of section guide lines when dragging into REAPER under high DPI scaling
+--   Support reaper_soundmole-x64.dll v0.0.11
+-- @reference
+--   https://forum.cockos.com/showthread.php?t=300916
+-- @links
+--   https://www.soundengine.cn/u/zaibuyidao
+--   https://github.com/zaibuyidao/ReaScripts
+-- @metapackage
+-- @provides
+--   [main=main] Soundmole/zaibuyidao_Soundmole.lua
+--   [main=main] Soundmole/zaibuyidao_Soundmole - Add Selected Files to Target Database.lua
+--   [nomain] Soundmole/lib/*.lua
+--   [nomain] Soundmole/lib/*.py
+--   [nomain] Soundmole/lib/*.cur
+--   Soundmole/lang/*.txt
+--   Soundmole/data/*.csv
+--   Soundmole/data/icons.otf
+--   Soundmole/data/icons-regular.otf
+--   Soundmole/data/odrf_upr_regular.otf
+-- @donation http://www.paypal.me/zaibuyidao
+-- @about Requires JS_ReaScriptAPI & SWS Extension
+
+-- Licensed under the GNU GPL v3
