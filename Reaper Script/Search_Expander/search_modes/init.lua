@@ -11,9 +11,10 @@
 --   init(script_path) -> bool
 --   expand(term, input) -> result
 --
---   result 格式（二选一）:
+--   result 格式（三选一）:
 --     分类模式: { source="xxx", label="显示名", categories={ ["catpath"]={"w1","w2"} } }
 --     列表模式: { source="xxx", label="显示名", words={"w1","w2"} }
+--     描述模式: { source="xxx", label="显示名", descriptions={"desc1","desc2"} }
 
 local M = {}
 
@@ -66,9 +67,9 @@ function M.load_all(script_path)
     M.register("personal", personal)
   end
 
-  -- 新模式在此添加:
-  -- local ok3, xxx = pcall(dofile, script_path .. "search_modes/xxx.lua")
-  -- if ok3 then xxx.init(script_path); M.register("xxx", xxx) end
+  -- Boom 描述搜索模式
+  local ok3, boom = pcall(dofile, script_path .. "search_modes/boom.lua")
+  if ok3 then boom.init(script_path); M.register("boom", boom) end
 end
 
 return M

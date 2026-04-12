@@ -23,6 +23,7 @@ local modes = dofile(script_path .. "search_modes/init.lua")
 modes.load_all(script_path)
 local ucs_mode = modes.get("ucs")
 local personal_mode = modes.get("personal")
+local boom_mode = modes.get("boom")
 
 -- ================================================================
 -- 内置中文映射（短语级 + 词级）
@@ -269,7 +270,7 @@ end
 function expand(input)
   if search_cache[input] then return search_cache[input].result, search_cache[input].no_match end
   local terms = tokenize(input)
-  local result = {ucs={}, personal_categories={}}
+  local result = {ucs={}, personal_categories={}, boom_descriptions={}}
   local seen = {}
   local no_match = {}
 
@@ -320,12 +321,20 @@ function expand(input)
     if not found then table.insert(no_match, term) end
   end
 
+  -- Boom 描述搜索（多词取交集）
+  if boom_mode and boom_mode.ready() then
+    local br = boom_mode.expand_multi(terms)
+    if br and br.descriptions then
+      result.boom_descriptions = br.descriptions
+    end
+  end
+
   search_cache[input] = {result=result, no_match=no_match}
   return result, no_match
 end
 
 local function expand_terms(terms)
-  local result = {ucs={}, personal_categories={}}
+  local result = {ucs={}, personal_categories={}, boom_descriptions={}}
   local seen = {}
   local function add(list, w)
     if not seen[w] then seen[w] = true; table.insert(list, w) end
@@ -352,6 +361,15 @@ local function expand_terms(terms)
       end
     end
   end
+
+  -- Boom 描述搜索
+  if boom_mode and boom_mode.ready() then
+    local br = boom_mode.expand_multi(terms)
+    if br and br.descriptions then
+      result.boom_descriptions = br.descriptions
+    end
+  end
+
   return result
 end
 
@@ -871,6 +889,44 @@ function loop()
       --   reaper.ImGui_TextColored(ctx, 0xFFCC88FF, "XXX模式 (" .. xxx_count .. ")")
       --   ...
       -- end
+
+      -- Boom 描述结果
+      local boom_descs = results.boom_descriptions or {}
+      if #boom_descs > 0 then
+        if collapsed_cats["__boom"] == nil then collapsed_cats["__boom"] = false end
+        local boom_collapsed = collapsed_cats["__boom"]
+        local arrow = boom_collapsed and ">" or "v"
+        if reaper.ImGui_SmallButton(ctx, arrow .. "##boom") then
+          collapsed_cats["__boom"] = not boom_collapsed
+          boom_collapsed = collapsed_cats["__boom"]
+        end
+        reaper.ImGui_SameLine(ctx)
+        reaper.ImGui_TextColored(ctx, 0xFFCC88FF, "Boom 描述 (" .. #boom_descs .. ")")
+        if not boom_collapsed then
+          reaper.ImGui_Indent(ctx)
+          for di, desc in ipairs(boom_descs) do
+            -- 描述序号
+            reaper.ImGui_TextColored(ctx, 0xFF666666, di .. ".")
+            reaper.ImGui_SameLine(ctx, 0, 4)
+            -- 拆词渲染，每个词可点击搜索
+            local first = true
+            for word in desc:gmatch("[%a][%a']*[%a]+") do
+              if not first then
+                reaper.ImGui_SameLine(ctx, 0, 2)
+              end
+              first = false
+              if reaper.ImGui_SmallButton(ctx, word .. "##b" .. di .. "_" .. word) then
+                do_search(word)
+              end
+            end
+            if di < #boom_descs then
+              reaper.ImGui_Separator(ctx)
+            end
+          end
+          reaper.ImGui_Unindent(ctx)
+          reaper.ImGui_Spacing(ctx)
+        end
+      end
 
       -- 复制选中词按钮
       if selected_word ~= "" then
