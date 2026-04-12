@@ -182,4 +182,35 @@ function M.expand(term)
   }
 end
 
+-- 获取指定分类路径下的所有词
+function M.get_words_by_category(catpath)
+  return ucs_entries[catpath] or {}
+end
+
+-- 获取所有顶级分类名（去重排序）
+function M.get_top_categories()
+  local set = {}
+  for catpath in pairs(ucs_entries) do
+    local top = catpath:match("^([^/]+)")
+    if top then set[top] = true end
+  end
+  local list = {}
+  for k in pairs(set) do table.insert(list, k) end
+  table.sort(list)
+  return list
+end
+
+-- 获取指定顶级分类下的所有子分类路径
+function M.get_sub_categories(top_cat)
+  local list = {}
+  local prefix = top_cat .. "/"
+  for catpath in pairs(ucs_entries) do
+    if catpath:find(prefix, 1, true) == 1 then
+      table.insert(list, catpath)
+    end
+  end
+  table.sort(list)
+  return list
+end
+
 return M

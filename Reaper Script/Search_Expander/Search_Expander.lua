@@ -14,7 +14,7 @@ local ctx = reaper.ImGui_CreateContext("Search Expander")
 -- ================================================================
 local script_path = ({reaper.get_action_context()})[2]:match("(.*[/\\])")
 local history_file = script_path .. "search_history.lua"
-local favorites_file = script_path .. "search_favorites.lua"
+local debug_file = script_path .. "debug_notes.lua"
 
 -- ================================================================
 -- 加载搜索模式
@@ -108,8 +108,6 @@ end
 -- ================================================================
 local function load_list(file) local ok, data = pcall(dofile, file); return (ok and type(data) == "table") and data or {} end
 local function save_list(file, data) local f = io.open(file, "w"); if f then f:write("return {\n"); for _, v in ipairs(data) do f:write(string.format("  %q,\n", v)) end; f:write("}\n"); f:close() end end
-local function load_favorites_map(file) local ok, data = pcall(dofile, file); return (ok and type(data) == "table") and data or {} end
-local function save_favorites_map(file, data) local f = io.open(file, "w"); if f then f:write("return {\n"); for k, v in pairs(data) do f:write(string.format("  [%q] = true,\n", k)) end; f:write("}\n"); f:close() end end
 
 -- ================================================================
 -- UI state
@@ -118,16 +116,25 @@ local input_buf = ""
 local prev_input = ""
 local base_results = nil
 local results = nil
-local suggestions = nil
 local first_frame = true
+local suggestions = nil
 local history = load_list(history_file)
-local favorites = load_favorites_map(favorites_file)
+local debug_notes = load_list(debug_file)
 local collapsed_cats = {}
 local history_open = false
-local favorites_open = false
+local debug_open = false
+local debug_input_buf = ""
 local search_cache = {}
 local zh_candidates = {}
 local selected_word = ""
+
+-- 分类选择器状态
+local picker_open = false
+local picker_source = ""
+local picker_top_cats = {}
+local picker_selected_top = ""
+local picker_sub_cats = {}
+local picker_selected = {} -- {[catpath]=true}
 
 -- 渲染双列词列表（左英右中，各自可点击）
 local function draw_words(words, catpath, id_prefix)
@@ -189,8 +196,8 @@ local function do_search(query)
 end
 
 -- 结果文本缓冲
-local buf_per_en = ""
-local buf_per_cn = ""
+local per_en_bufs = {}
+local per_cn_bufs = {}
 local ucs_en_bufs = {}
 local ucs_cn_bufs = {}
 
@@ -262,7 +269,7 @@ end
 function expand(input)
   if search_cache[input] then return search_cache[input].result, search_cache[input].no_match end
   local terms = tokenize(input)
-  local result = {personal={}, ucs={}}
+  local result = {ucs={}, personal_categories={}}
   local seen = {}
   local no_match = {}
 
@@ -276,12 +283,15 @@ function expand(input)
     -- 个人经验模式
     if personal_mode then
       local pr = personal_mode.expand(term, input)
-      if #pr.words > 0 then
-        found = true
-        for _, w in ipairs(pr.words) do
-          for sub_w in w:gmatch("%S+") do add(result.personal, sub_w) end
+      local has_cats = false
+      for catpath, cat_words in pairs(pr.categories) do
+        has_cats = true
+        if not result.personal_categories[catpath] then result.personal_categories[catpath] = {} end
+        for _, w in ipairs(cat_words) do
+          if not seen[w] then seen[w] = true; table.insert(result.personal_categories[catpath], w) end
         end
       end
+      if has_cats then found = true end
     end
 
     -- UCS 分类模式
@@ -315,17 +325,20 @@ function expand(input)
 end
 
 local function expand_terms(terms)
-  local result = {personal={}, ucs={}}
+  local result = {ucs={}, personal_categories={}}
   local seen = {}
   local function add(list, w)
     if not seen[w] then seen[w] = true; table.insert(list, w) end
   end
   for _, term in ipairs(terms) do
-    -- 个人经验
+    -- 个人映射
     if personal_mode then
       local pr = personal_mode.expand(term)
-      for _, w in ipairs(pr.words) do
-        for sub_w in w:gmatch("%S+") do add(result.personal, sub_w) end
+      for catpath, cat_words in pairs(pr.categories) do
+        if not result.personal_categories[catpath] then result.personal_categories[catpath] = {} end
+        for _, w in ipairs(cat_words) do
+          if not seen[w] then seen[w] = true; table.insert(result.personal_categories[catpath], w) end
+        end
       end
     end
     -- UCS 分类
@@ -345,6 +358,26 @@ end
 -- ================================================================
 -- 应用条件到基础结果
 -- ================================================================
+local function flatten_categories(cats)
+  local list = {}
+  local seen = {}
+  for _, words in pairs(cats or {}) do
+    for _, w in ipairs(words) do
+      if not seen[w] then seen[w] = true; table.insert(list, w) end
+    end
+  end
+  return list
+end
+
+local function get_all_words(result)
+  local list = {}
+  local seen = {}
+  local function add(w) if not seen[w] then seen[w] = true; table.insert(list, w) end end
+  for _, w in ipairs(flatten_categories(result.personal_categories)) do add(w) end
+  for _, w in ipairs(flatten_categories(result.ucs)) do add(w) end
+  return list
+end
+
 local function apply_conditions(base, conditions)
   if not base then return nil end
   local has_conditions = false
@@ -362,9 +395,7 @@ local function apply_conditions(base, conditions)
       elseif cond.relation == 1 then
         table.insert(or_expanded_list, expanded)
       else
-        local function add_not(list) for _, w in ipairs(list) do not_set[w] = true end end
-        add_not(expanded.personal)
-        for _, cw in pairs(expanded.ucs) do add_not(cw) end
+        for _, w in ipairs(get_all_words(expanded)) do not_set[w] = true end
       end
     end
   end
@@ -372,15 +403,11 @@ local function apply_conditions(base, conditions)
   local and_pass = {}
   if #and_list > 0 then
     local first = {}
-    local function add_first(list) for _, w in ipairs(list) do first[w] = true end end
-    add_first(and_list[1].personal)
-    for _, cw in pairs(and_list[1].ucs) do add_first(cw) end
+    for _, w in ipairs(get_all_words(and_list[1])) do first[w] = true end
     for w in pairs(first) do and_pass[w] = true end
     for i = 2, #and_list do
       local cur = {}
-      local function add_cur(list) for _, w in ipairs(list) do cur[w] = true end end
-      add_cur(and_list[i].personal)
-      for _, cw in pairs(and_list[i].ucs) do add_cur(cw) end
+      for _, w in ipairs(get_all_words(and_list[i])) do cur[w] = true end
       for w in pairs(and_pass) do if not cur[w] then and_pass[w] = nil end end
     end
   end
@@ -395,7 +422,10 @@ local function apply_conditions(base, conditions)
     if not_set[w] then return end
     seen[w] = true; table.insert(list, w)
   end
-  for _, w in ipairs(base.personal) do add_base(final_personal, w) end
+  for cat, cw in pairs(base.personal_categories or {}) do
+    if not final_personal[cat] then final_personal[cat] = {} end
+    for _, w in ipairs(cw) do add_base(final_personal[cat], w) end
+  end
   for cat, cw in pairs(base.ucs) do
     for _, w in ipairs(cw) do
       if not seen[w] and (#and_list == 0 or and_pass[w]) and not not_set[w] then
@@ -406,13 +436,11 @@ local function apply_conditions(base, conditions)
     end
   end
 
-  local function add_or(list, w)
-    if seen[w] then return end
-    if not_set[w] then return end
-    seen[w] = true; table.insert(list, w)
-  end
   for _, expanded in ipairs(or_expanded_list) do
-    for _, w in ipairs(expanded.personal) do add_or(final_personal, w) end
+    for cat, cw in pairs(expanded.personal_categories or {}) do
+      if not final_personal[cat] then final_personal[cat] = {} end
+      for _, w in ipairs(cw) do add_base(final_personal[cat], w) end
+    end
     for cat, cw in pairs(expanded.ucs) do
       for _, w in ipairs(cw) do
         if not seen[w] and not not_set[w] then
@@ -424,7 +452,7 @@ local function apply_conditions(base, conditions)
     end
   end
 
-  return {personal=final_personal, ucs=final_ucs}
+  return {personal_categories=final_personal, ucs=final_ucs}
 end
 
 -- ================================================================
@@ -432,10 +460,14 @@ end
 -- ================================================================
 local function update_result_bufs()
   if not results then return end
-  buf_per_en = format_en(results.personal)
-  buf_per_cn = format_cn(results.personal)
+  per_en_bufs = {}
+  per_cn_bufs = {}
   ucs_en_bufs = {}
   ucs_cn_bufs = {}
+  for catpath, cat_words in pairs(results.personal_categories or {}) do
+    per_en_bufs[catpath] = format_en(cat_words)
+    per_cn_bufs[catpath] = format_cn(cat_words, catpath)
+  end
   for catpath, cat_words in pairs(results.ucs) do
     ucs_en_bufs[catpath] = format_en(cat_words)
     ucs_cn_bufs[catpath] = format_cn(cat_words, catpath)
@@ -463,14 +495,9 @@ function loop()
     local changed, new_val = reaper.ImGui_InputText(ctx, "##input", input_buf, 256)
     if changed and new_val ~= input_buf then input_buf = new_val end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "收藏", 40, 22) and input_buf ~= "" then
-      favorites[input_buf] = true
-      save_favorites_map(favorites_file, favorites)
-    end
+    if reaper.ImGui_Button(ctx, "历史", 40, 22) then history_open = not history_open; debug_open = false end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "历史", 40, 22) then history_open = not history_open; favorites_open = false end
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "收藏夹", 50, 22) then favorites_open = not favorites_open; history_open = false end
+    if reaper.ImGui_Button(ctx, "Debug", 50, 22) then debug_open = not debug_open; history_open = false end
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_Button(ctx, "清除", 40, 22) then
       input_buf = ""
@@ -480,13 +507,13 @@ function loop()
       zh_candidates = {}
       nav_history = {}
       nav_pos = 0
-      buf_per_en, buf_per_cn = "", ""
+      per_en_bufs, per_cn_bufs = {}, {}
       ucs_en_bufs, ucs_cn_bufs = {}, {}
       suggestions = nil
       builder_conditions = {{text="", relation=0}}
       collapsed_cats = {}
       history_open = false
-      favorites_open = false
+      debug_open = false
     end
     if input_buf ~= prev_input then
       prev_input = input_buf
@@ -543,7 +570,7 @@ function loop()
             nav_push(input_buf)
           else
             base_results = nil; results = nil
-            buf_per_en, buf_per_cn = "", ""
+            per_en_bufs, per_cn_bufs = {}, {}
             ucs_en_bufs, ucs_cn_bufs = {}, {}
           end
           suggestions = nil
@@ -564,7 +591,7 @@ function loop()
       else
         zh_candidates = {}
         results = nil
-        buf_per_en, buf_per_cn = "", ""
+        per_en_bufs, per_cn_bufs = {}, {}
         ucs_en_bufs, ucs_cn_bufs = {}, {}
         suggestions = nil
       end
@@ -618,7 +645,7 @@ function loop()
         update_result_bufs()
       elseif changed_cands then
         base_results = nil; results = nil
-        buf_per_en, buf_per_cn = "", ""
+        per_en_bufs, per_cn_bufs = {}, {}
         ucs_en_bufs, ucs_cn_bufs = {}, {}
       end
     end
@@ -657,6 +684,17 @@ function loop()
     if reaper.ImGui_Button(ctx, "添加条件", 70, 22) then
       show_builder = not show_builder
     end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "映射", 40, 22) then
+      if input_buf ~= "" and ucs_mode then
+        picker_source = input_buf
+        picker_top_cats = ucs_mode.get_top_categories()
+        picker_selected_top = ""
+        picker_sub_cats = {}
+        picker_selected = {}
+        picker_open = true
+      end
+    end
 
     if history_open and #history > 0 then
       reaper.ImGui_Separator(ctx)
@@ -668,19 +706,41 @@ function loop()
       reaper.ImGui_EndChild(ctx)
     end
 
-    if favorites_open then
+    if debug_open then
       reaper.ImGui_Separator(ctx)
-      reaper.ImGui_TextColored(ctx, 0xFFCC8888, "收藏夹：")
-      local fav_list = {}
-      for k, _ in pairs(favorites) do table.insert(fav_list, k) end
-      if #fav_list > 0 then
-        reaper.ImGui_BeginChild(ctx, "##fav", 0, math.min(#fav_list * 22, 150))
-        for i, fav in ipairs(fav_list) do
-          if reaper.ImGui_Selectable(ctx, fav .. "##f" .. i) then input_buf = fav; prev_input = fav; favorites_open = false end
+      reaper.ImGui_TextColored(ctx, 0xFFFF8888, "Debug 清单：")
+      reaper.ImGui_SameLine(ctx)
+      reaper.ImGui_TextColored(ctx, 0xFF888888, "(输入后点添加)")
+
+      -- 输入框
+      reaper.ImGui_SetNextItemWidth(ctx, -60)
+      local dbg_changed, dbg_val = reaper.ImGui_InputText(ctx, "##dbginput", debug_input_buf, 256)
+      if dbg_changed then debug_input_buf = dbg_val end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, "添加", 46, 22) and debug_input_buf ~= "" then
+        table.insert(debug_notes, debug_input_buf)
+        save_list(debug_file, debug_notes)
+        debug_input_buf = ""
+      end
+
+      -- 列表
+      if #debug_notes > 0 then
+        reaper.ImGui_BeginChild(ctx, "##dbglist", 0, math.min(#debug_notes * 24, 300))
+        for i = #debug_notes, 1, -1 do
+          reaper.ImGui_PushID(ctx, i)
+          if reaper.ImGui_SmallButton(ctx, "X") then
+            table.remove(debug_notes, i)
+            save_list(debug_file, debug_notes)
+            reaper.ImGui_PopID(ctx)
+            break
+          end
+          reaper.ImGui_SameLine(ctx)
+          reaper.ImGui_TextWrapped(ctx, debug_notes[i])
+          reaper.ImGui_PopID(ctx)
         end
         reaper.ImGui_EndChild(ctx)
       else
-        reaper.ImGui_Text(ctx, "收藏夹为空")
+        reaper.ImGui_TextColored(ctx, 0xFF888888, "暂无记录")
       end
     end
 
@@ -749,10 +809,33 @@ function loop()
 
     if results then
       reaper.ImGui_BeginChild(ctx, "##results", 0, 0)
-      if #results.personal > 0 then
-        reaper.ImGui_TextColored(ctx, 0xFFFFAA00, "个人经验 (" .. #results.personal .. ")")
-        draw_words(results.personal, nil, "per")
-        reaper.ImGui_Spacing(ctx)
+
+      -- 个人映射（按分类显示，与 UCS 同格式）
+      local per_count = 0
+      for _ in pairs(results.personal_categories or {}) do per_count = per_count + 1 end
+      if per_count > 0 then
+        reaper.ImGui_TextColored(ctx, 0xFFFFAA00, "个人映射分类 (" .. per_count .. ")")
+        for catpath, cat_words in pairs(results.personal_categories) do
+          if #cat_words > 0 then
+            local key = "per_" .. catpath
+            if collapsed_cats[key] == nil then collapsed_cats[key] = true end
+            local collapsed = collapsed_cats[key]
+            local arrow = collapsed and ">" or "v"
+            if reaper.ImGui_SmallButton(ctx, arrow .. "##" .. key) then
+              collapsed_cats[key] = not collapsed
+              collapsed = collapsed_cats[key]
+            end
+            local label = catpath == "direct" and "直接映射" or catpath
+            reaper.ImGui_SameLine(ctx)
+            reaper.ImGui_TextColored(ctx, 0xFFAAAA88, label .. " (" .. #cat_words .. ")")
+            if not collapsed then
+              reaper.ImGui_Indent(ctx)
+              draw_words(cat_words, catpath ~= "direct" and catpath or nil, key)
+              reaper.ImGui_Unindent(ctx)
+              reaper.ImGui_Spacing(ctx)
+            end
+          end
+        end
       end
 
       local ucs_count = 0
@@ -806,6 +889,81 @@ function loop()
       end
 
       reaper.ImGui_EndChild(ctx)
+    end
+
+    -- 新增个人映射：分类选择弹窗
+    if picker_open then
+      reaper.ImGui_OpenPopup(ctx, "新增映射")
+      picker_open = false
+    end
+
+    if reaper.ImGui_BeginPopupModal(ctx, "新增映射", nil, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
+      reaper.ImGui_Text(ctx, "将 \"" .. picker_source .. "\" 映射到 UCS 分类：")
+      reaper.ImGui_Separator(ctx)
+
+      -- 左右两栏
+      reaper.ImGui_BeginGroup(ctx)
+
+      -- 左栏：顶级分类
+      reaper.ImGui_TextColored(ctx, 0xFF88CC88, "大类")
+      reaper.ImGui_BeginChild(ctx, "##topcat", 160, 300)
+      for _, top in ipairs(picker_top_cats) do
+        local is_sel = (top == picker_selected_top)
+        if reaper.ImGui_Selectable(ctx, top .. "##top", is_sel) then
+          picker_selected_top = top
+          picker_sub_cats = ucs_mode.get_sub_categories(top)
+        end
+      end
+      reaper.ImGui_EndChild(ctx)
+
+      reaper.ImGui_SameLine(ctx)
+
+      -- 右栏：子分类（可多选）
+      reaper.ImGui_TextColored(ctx, 0xFF8888CC, "子分类")
+      reaper.ImGui_BeginChild(ctx, "##subcat", 260, 300)
+      if picker_selected_top ~= "" then
+        for _, catpath in ipairs(picker_sub_cats) do
+          local sub = catpath:match("[^/]+/(.+)") or catpath
+          local checked = picker_selected[catpath] or false
+          local changed, new_val = reaper.ImGui_Checkbox(ctx, sub .. "##sub", checked)
+          if changed then picker_selected[catpath] = new_val or nil end
+        end
+      else
+        reaper.ImGui_TextColored(ctx, 0xFF888888, "← 选择大类")
+      end
+      reaper.ImGui_EndChild(ctx)
+
+      reaper.ImGui_EndGroup(ctx)
+
+      reaper.ImGui_Separator(ctx)
+
+      -- 已选分类展示
+      local sel_count = 0
+      for _ in pairs(picker_selected) do sel_count = sel_count + 1 end
+      if sel_count > 0 then
+        reaper.ImGui_TextColored(ctx, 0xFFFFAA00, "已选 (" .. sel_count .. ")：")
+        for cp in pairs(picker_selected) do
+          reaper.ImGui_SameLine(ctx)
+          reaper.ImGui_Text(ctx, cp)
+        end
+      end
+
+      -- 按钮
+      if sel_count > 0 then
+        if reaper.ImGui_Button(ctx, "确认", 80, 24) then
+          local catpaths = {}
+          for cp in pairs(picker_selected) do table.insert(catpaths, cp) end
+          personal_mode.add_categories(picker_source, catpaths)
+          search_cache = {}
+          reaper.ImGui_CloseCurrentPopup(ctx)
+        end
+        reaper.ImGui_SameLine(ctx)
+      end
+      if reaper.ImGui_Button(ctx, "取消", 80, 24) then
+        reaper.ImGui_CloseCurrentPopup(ctx)
+      end
+
+      reaper.ImGui_EndPopup(ctx)
     end
 
     reaper.ImGui_End(ctx)

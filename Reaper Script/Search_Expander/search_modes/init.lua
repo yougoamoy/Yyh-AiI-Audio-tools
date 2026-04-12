@@ -51,15 +51,18 @@ end
 
 -- 加载所有内置模式
 function M.load_all(script_path)
-  local ok, ucs = pcall(dofile, script_path .. "search_modes/ucs.lua")
+  local ucs
+  local ok, ucs_mod = pcall(dofile, script_path .. "search_modes/ucs.lua")
   if ok then
-    ucs.init(script_path)
-    M.register("ucs", ucs)
+    ucs_mod.init(script_path)
+    M.register("ucs", ucs_mod)
+    ucs = ucs_mod
   end
 
   local ok2, personal = pcall(dofile, script_path .. "search_modes/personal.lua")
   if ok2 then
     personal.init(script_path)
+    if ucs then personal.set_ucs_module(ucs) end
     M.register("personal", personal)
   end
 
