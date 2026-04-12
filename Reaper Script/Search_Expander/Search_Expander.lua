@@ -1,7 +1,11 @@
--- Sound Design Search Expander v2.1
+-- Sound Design Search Expander v2.2 (Modular)
 -- 输入设计需求关键词，输出多维度扩展搜索词
--- 功能：同义词扩展 + UCS分类发现 + 个人经验映射 + 布尔搜索导出
--- 支持中文短语输入，按维度分类输出英文搜索词
+-- 架构：search_modes/ 目录下独立搜索模式，通过注册中心统一调度
+--
+-- 添加新模式：
+--   1. search_modes/ 下新建 xxx.lua，实现 init() 和 expand() 接口
+--   2. search_modes/init.lua 中注册
+--   3. 主脚本无需修改
 
 local ctx = reaper.ImGui_CreateContext("Search Expander")
 
@@ -9,41 +13,19 @@ local ctx = reaper.ImGui_CreateContext("Search Expander")
 -- 路径
 -- ================================================================
 local script_path = ({reaper.get_action_context()})[2]:match("(.*[/\\])")
-local personal_file = script_path .. "personal_mappings.lua"
 local history_file = script_path .. "search_history.lua"
 local favorites_file = script_path .. "search_favorites.lua"
 
 -- ================================================================
--- 加载 UCS 数据
+-- 加载搜索模式
 -- ================================================================
-local ucs_ok, ucs_data = pcall(dofile, script_path .. "ucs_data.lua")
-local ucs_rev = ucs_ok and ucs_data.rev or {}
-local ucs_rev_expl = ucs_ok and ucs_data.rev_expl or {}
-local ucs_entries = ucs_ok and ucs_data.entries or {}
-
-local ucs_zh_ok, ucs_zh = pcall(dofile, script_path .. "ucszh_map.lua")
-if not ucs_zh_ok then ucs_zh = {} end
-
-local word_to_cats = {}
-local all_ucs_words = {}
-if ucs_ok then
-  for catpath, words in pairs(ucs_entries) do
-    for _, w in ipairs(words) do
-      if not word_to_cats[w] then word_to_cats[w] = {} end
-      table.insert(word_to_cats[w], catpath)
-    end
-  end
-  local set = {}
-  for _, words in pairs(ucs_entries) do
-    for _, w in ipairs(words) do
-      if not set[w] then set[w] = true; table.insert(all_ucs_words, w) end
-    end
-  end
-  table.sort(all_ucs_words)
-end
+local modes = dofile(script_path .. "search_modes/init.lua")
+modes.load_all(script_path)
+local ucs_mode = modes.get("ucs")
+local personal_mode = modes.get("personal")
 
 -- ================================================================
--- 中文短语（优先匹配）
+-- 内置中文映射（短语级 + 词级）
 -- ================================================================
 local phrase_cn = {
   ["脚步声"]="footstep", ["雷声"]="thunder", ["玻璃碎裂"]="glass shatter",
@@ -59,9 +41,6 @@ local phrase_cn = {
   ["飞船引擎"]="aircraft engine", ["汽车刹车"]="car brake",
 }
 
--- ================================================================
--- 中文单字/词映射
--- ================================================================
 local cn = {
   ["电"]="electric", ["电流"]="electric", ["电磁"]="electric", ["火花"]="spark",
   ["能量"]="energy", ["充能"]="energy", ["雷"]="lightning", ["雷电"]="lightning",
@@ -98,35 +77,12 @@ local cn = {
   ["声"]="sound",
 }
 
--- 中文 → 英文 反向查找（从 cn 表 + ucs_zh 分类表）
-local zh_to_en = {}
-for zh, en in pairs(cn) do
-  if not zh_to_en[zh] then zh_to_en[zh] = {} end
-  zh_to_en[zh][en] = true
-end
-for _, word_map in pairs(ucs_zh) do
-  for en, zh in pairs(word_map) do
-    if not zh_to_en[zh] then zh_to_en[zh] = {} end
-    zh_to_en[zh][en] = true
-  end
-end
+-- 将 cn 表注册到 UCS 模块（用于翻译查询）
+if ucs_mode then ucs_mode.register_cn(cn) end
 
 -- ================================================================
--- 英中翻译（基于 UCS v8.2，按分类存储）
+-- 格式化工具
 -- ================================================================
-local rev_cn = {}
-for k, v in pairs(cn) do if not rev_cn[v] then rev_cn[v] = k end end
-
-local function get_cn(w, catpath)
-  if catpath and ucs_zh[catpath] and ucs_zh[catpath][w] then return ucs_zh[catpath][w] end
-  if rev_cn[w] then return rev_cn[w] end
-  for zh, en in pairs(cn) do if en == w then return zh end end
-  for _, word_map in pairs(ucs_zh) do
-    if word_map[w] then return word_map[w] end
-  end
-  return ""
-end
-
 local function format_en(list)
   local seen = {}
   local unique = {}
@@ -140,7 +96,7 @@ local function format_cn(list, catpath)
   for _, w in ipairs(list) do
     if not seen[w] then
       seen[w] = true
-      local c = get_cn(w, catpath)
+      local c = ucs_mode and ucs_mode.get_cn(w, catpath) or ""
       table.insert(unique, c ~= "" and c or "无中文")
     end
   end
@@ -148,10 +104,8 @@ local function format_cn(list, catpath)
 end
 
 -- ================================================================
--- 个人映射
+-- 个人映射持久化
 -- ================================================================
-local function load_personal() local ok, data = pcall(dofile, personal_file); return (ok and type(data) == "table") and data or {} end
-local function save_personal(data) local f = io.open(personal_file, "w"); if f then f:write("return {\n"); for src, targets in pairs(data) do f:write(string.format("  [%q] = {", src)); for i, t in ipairs(targets) do if i > 1 then f:write(",") end; f:write(string.format("%q", t)) end; f:write("},\n") end; f:write("}\n"); f:close() end end
 local function load_list(file) local ok, data = pcall(dofile, file); return (ok and type(data) == "table") and data or {} end
 local function save_list(file, data) local f = io.open(file, "w"); if f then f:write("return {\n"); for _, v in ipairs(data) do f:write(string.format("  %q,\n", v)) end; f:write("}\n"); f:close() end end
 local function load_favorites_map(file) local ok, data = pcall(dofile, file); return (ok and type(data) == "table") and data or {} end
@@ -171,7 +125,6 @@ local favorites = load_favorites_map(favorites_file)
 local collapsed_cats = {}
 local history_open = false
 local favorites_open = false
-local personal_mappings = load_personal()
 local search_cache = {}
 local zh_candidates = {}
 local selected_word = ""
@@ -183,7 +136,7 @@ local function draw_words(words, catpath, id_prefix)
   local cur_x = 0
   local need_sep = false
   for i, w in ipairs(words) do
-    local zh = get_cn(w, catpath)
+    local zh = ucs_mode and ucs_mode.get_cn(w, catpath) or ""
     if need_sep then
       if cur_x + col_w * 2 + 8 <= avail_w then
         reaper.ImGui_SameLine(ctx, 0, 8)
@@ -192,7 +145,6 @@ local function draw_words(words, catpath, id_prefix)
         cur_x = 0
       end
     end
-    -- 英文
     local en_w = reaper.ImGui_CalcTextSize(ctx, w) + 16
     if reaper.ImGui_Selectable(ctx, w .. "##e" .. id_prefix .. i, selected_word == w,
         reaper.ImGui_SelectableFlags_AllowDoubleClick(), en_w) then
@@ -202,7 +154,6 @@ local function draw_words(words, catpath, id_prefix)
       end
     end
     cur_x = cur_x + en_w
-    -- 中文
     if zh ~= "" then
       reaper.ImGui_SameLine(ctx, 0, 2)
       local cn_w = reaper.ImGui_CalcTextSize(ctx, zh) + 16
@@ -226,7 +177,6 @@ local nav_pos = 0
 local function nav_push(query)
   if query == "" then return end
   if nav_history[nav_pos] == query then return end
-  -- 截断前进历史
   while #nav_history > nav_pos do table.remove(nav_history) end
   table.insert(nav_history, query)
   nav_pos = #nav_history
@@ -238,7 +188,7 @@ local function do_search(query)
   zh_candidates = {}
 end
 
--- 结果文本缓冲（英文和中文分开）
+-- 结果文本缓冲
 local buf_per_en = ""
 local buf_per_cn = ""
 local ucs_en_bufs = {}
@@ -246,16 +196,11 @@ local ucs_cn_bufs = {}
 
 -- 条件构建器状态
 local show_builder = false
-local builder_conditions = {{text="", relation=0}}  -- {text, relation: 0=且,1=或,2=非}
+local builder_conditions = {{text="", relation=0}}
 
 -- ================================================================
 -- 分词 + 短语优先匹配
 -- ================================================================
-local all_ucs_phrases = {}
-if ucs_ok then
-  for phrase in pairs(ucs_rev) do all_ucs_phrases[phrase:lower()] = true end
-end
-
 local function is_chinese(s)
   return s:match("[\228-\233][\128-\191][\128-\191]") ~= nil
 end
@@ -277,11 +222,12 @@ local function tokenize(input)
 
     if is_chinese(seg) then
       local found_en = {}
-      -- 精确匹配 zh_to_en
+      local zh_to_en = ucs_mode and ucs_mode.get_zh_to_en() or {}
+      -- 精确匹配
       if zh_to_en[seg] then
         for en in pairs(zh_to_en[seg]) do found_en[en] = true end
       end
-      -- 按、或空格分割后逐词精确匹配
+      -- 分割后逐词精确匹配
       for zh_key, en_set in pairs(zh_to_en) do
         for part in zh_key:gmatch("[^、,%s/]+") do
           if part == seg then
@@ -291,13 +237,13 @@ local function tokenize(input)
       end
       for en in pairs(found_en) do table.insert(terms, en) end
       if #terms == 0 then table.insert(terms, seg) end
-    elseif all_ucs_phrases[seg] then
+    elseif ucs_mode and ucs_mode.is_ucs_phrase(seg) then
       table.insert(terms, seg)
     else
       for word in segment:gmatch("%S+") do
         local w = word:lower():gsub("^%s+",""):gsub("%s+$","")
         if w ~= "" then
-          if all_ucs_phrases[w] then
+          if ucs_mode and ucs_mode.is_ucs_phrase(w) then
             table.insert(terms, w)
           else
             table.insert(terms, cn[w] or w)
@@ -311,63 +257,7 @@ local function tokenize(input)
 end
 
 -- ================================================================
--- 前缀匹配
--- ================================================================
-local function find_prefix_matches(prefix)
-  local matches = {}
-  for _, word in ipairs(all_ucs_words) do
-    if word:find("^" .. prefix) and word ~= prefix then
-      table.insert(matches, word)
-      if #matches >= 8 then break end
-    end
-  end
-  return matches
-end
-
--- ================================================================
--- 词干变体
--- ================================================================
-local function get_variants(w)
-  local set = {[w] = true}
-  local list = {w}
-  local function add(v)
-    if not set[v] and #v >= 3 then set[v] = true; table.insert(list, v) end
-  end
-  -- 去后缀 → 加其他后缀
-  if w:match("ing$") then
-    local base = w:sub(1, -4)
-    add(base); add(base .. "e"); add(base .. "ed"); add(base .. "s"); add(base .. "er")
-    if #base >= 2 then add(base:sub(1, -2) .. "e") end
-  end
-  if w:match("ed$") then
-    local base = w:sub(1, -3)
-    add(base); add(base .. "e"); add(base .. "ing"); add(base .. "s"); add(base .. "er")
-    add(w:sub(1, -2))  -- doubled consonant: sliced → slic
-  end
-  if w:match("er$") then
-    local base = w:sub(1, -3)
-    add(base); add(base .. "ing"); add(base .. "ed"); add(base .. "s")
-  end
-  if w:match("s$") and not w:match("ss$") then
-    local base = w:sub(1, -2)
-    add(base); add(base .. "ing"); add(base .. "ed"); add(base .. "er")
-  end
-  if w:match("tion$") then
-    local base = w:sub(1, -4)
-    add(base); add(base .. "te"); add(base .. "ted"); add(base .. "ting")
-  end
-  if w:match("ly$") then
-    add(w:sub(1, -3))
-  end
-  -- 加后缀
-  if not w:match("e$") then add(w .. "ing") else add(w:sub(1,-2) .. "ing") end
-  if not w:match("e$") then add(w .. "ed") else add(w:sub(1,-2) .. "ed") end
-  add(w .. "s"); add(w .. "er"); add(w .. "tion")
-  return list
-end
-
--- ================================================================
--- 核心扩展
+-- 核心扩展（通过模式注册中心调用所有模式）
 -- ================================================================
 function expand(input)
   if search_cache[input] then return search_cache[input].result, search_cache[input].no_match end
@@ -382,30 +272,41 @@ function expand(input)
 
   for _, term in ipairs(terms) do
     local found = false
-    local pm = personal_mappings[term] or personal_mappings[input]
-    if pm then
-      found = true
-      for _, w in ipairs(pm) do
-        for sub_w in w:gmatch("%S+") do add(result.personal, sub_w) end
-      end
-    end
-    for _, variant in ipairs(get_variants(term)) do
-      local cats_set = {}
-      for _, src in ipairs({ucs_rev[variant], ucs_rev_expl[variant], word_to_cats[variant]}) do
-        if src then for _, cp in ipairs(src) do cats_set[cp] = true end end
-      end
-      for catpath in pairs(cats_set) do
+
+    -- 个人经验模式
+    if personal_mode then
+      local pr = personal_mode.expand(term, input)
+      if #pr.words > 0 then
         found = true
-        if not result.ucs[catpath] then
-          result.ucs[catpath] = {}
-          if ucs_entries[catpath] then
-            for _, w in ipairs(ucs_entries[catpath]) do
-              if not seen[w] then seen[w] = true; table.insert(result.ucs[catpath], w) end
-            end
-          end
+        for _, w in ipairs(pr.words) do
+          for sub_w in w:gmatch("%S+") do add(result.personal, sub_w) end
         end
       end
     end
+
+    -- UCS 分类模式
+    if ucs_mode then
+      local ur = ucs_mode.expand(term)
+      local has_cats = false
+      for catpath, cat_words in pairs(ur.categories) do
+        has_cats = true
+        if not result.ucs[catpath] then result.ucs[catpath] = {} end
+        for _, w in ipairs(cat_words) do
+          if not seen[w] then seen[w] = true; table.insert(result.ucs[catpath], w) end
+        end
+      end
+      if has_cats then found = true end
+    end
+
+    -- 新模式在此继续调用:
+    -- if xxx_mode then
+    --   local xr = xxx_mode.expand(term, input)
+    --   if xr and #xr.words > 0 then
+    --     found = true
+    --     for _, w in ipairs(xr.words) do add(result.xxx, w) end
+    --   end
+    -- end
+
     if not found then table.insert(no_match, term) end
   end
 
@@ -420,22 +321,20 @@ local function expand_terms(terms)
     if not seen[w] then seen[w] = true; table.insert(list, w) end
   end
   for _, term in ipairs(terms) do
-    local pm = personal_mappings[term]
-    if pm then
-      for _, w in ipairs(pm) do
+    -- 个人经验
+    if personal_mode then
+      local pr = personal_mode.expand(term)
+      for _, w in ipairs(pr.words) do
         for sub_w in w:gmatch("%S+") do add(result.personal, sub_w) end
       end
     end
-    local cats = ucs_rev[term] or word_to_cats[term]
-    if cats then
-      for _, catpath in ipairs(cats) do
-        if not result.ucs[catpath] then
-          result.ucs[catpath] = {}
-          if ucs_entries[catpath] then
-            for _, w in ipairs(ucs_entries[catpath]) do
-              if not seen[w] then seen[w] = true; table.insert(result.ucs[catpath], w) end
-            end
-          end
+    -- UCS 分类
+    if ucs_mode then
+      local ur = ucs_mode.expand(term)
+      for catpath, cat_words in pairs(ur.categories) do
+        if not result.ucs[catpath] then result.ucs[catpath] = {} end
+        for _, w in ipairs(cat_words) do
+          if not seen[w] then seen[w] = true; table.insert(result.ucs[catpath], w) end
         end
       end
     end
@@ -552,9 +451,9 @@ function loop()
     first_frame = false
   end
 
-  local vis, open = reaper.ImGui_Begin(ctx, "Search Expander v2.1", true)
+  local vis, open = reaper.ImGui_Begin(ctx, "Search Expander v2.2", true)
   if vis then
-    if not ucs_ok then
+    if not ucs_mode then
       reaper.ImGui_TextColored(ctx, 0xFF00AAFF, "⚠ UCS 数据未载入，仅使用内置词库")
     end
     
@@ -597,6 +496,7 @@ function loop()
         if is_cn_input then
           -- 中文输入：收集候选英文词
           local found_en = {}
+          local zh_to_en = ucs_mode and ucs_mode.get_zh_to_en() or {}
           -- 直接精确匹配
           if zh_to_en[input_clean] then
             for en in pairs(zh_to_en[input_clean]) do found_en[en] = true end
@@ -609,15 +509,17 @@ function loop()
               end
             end
           end
-          -- 兜底：直接扫描所有ucs_zh和cn表
+          -- 兜底：直接扫描所有 ucs_zh 和 cn 表
           if not next(found_en) then
-            for _, word_map in pairs(ucs_zh) do
-              for en, zh in pairs(word_map) do
+            local ucs_zh_data = ucs_mode and (function()
+              -- 通过 get_zh_to_en 间接获取
+              local z2e = ucs_mode.get_zh_to_en()
+              for zh, en_set in pairs(z2e) do
                 if zh == input_clean or zh:find(input_clean, 1, true) then
-                  found_en[en] = true
+                  for en in pairs(en_set) do found_en[en] = true end
                 end
               end
-            end
+            end)() or nil
             for zh, en in pairs(cn) do
               if zh == input_clean or zh:find(input_clean, 1, true) then
                 found_en[en] = true
@@ -626,13 +528,10 @@ function loop()
           end
           -- 调试
           if not next(found_en) then
-            local test = zh_to_en[input_clean]
-            local has = test and "yes" or "no"
-            local ucs_count = 0
-            for _ in pairs(ucs_zh) do ucs_count = ucs_count + 1 end
+            local z2e = ucs_mode and ucs_mode.get_zh_to_en() or {}
             local zh_count = 0
-            for _ in pairs(zh_to_en) do zh_count = zh_count + 1 end
-            reaper.ImGui_TextColored(ctx, 0xFFFF0000, "'"..input_clean.."' zh_to_en="..has.." ucs_zh="..ucs_count.." zh2en="..zh_count)
+            for _ in pairs(z2e) do zh_count = zh_count + 1 end
+            reaper.ImGui_TextColored(ctx, 0xFFFF0000, "'"..input_clean.."' zh2en="..zh_count)
           end
           zh_candidates = {}
           for en in pairs(found_en) do table.insert(zh_candidates, en) end
@@ -658,7 +557,7 @@ function loop()
           nav_push(input_buf)
           suggestions = {}
           for _, term in ipairs(no_match) do
-            local matches = find_prefix_matches(term)
+            local matches = ucs_mode and ucs_mode.suggest(term) or {}
             if #matches > 0 then suggestions[term] = matches end
           end
         end
@@ -674,14 +573,13 @@ function loop()
     -- 中文候选词显示
     if #zh_candidates > 0 then
       reaper.ImGui_TextColored(ctx, 0xFF88CC88, "匹配词汇（点击删除）：")
-      -- 计算所需行数来确定高度
       local win_w = reaper.ImGui_GetContentRegionAvail(ctx)
       local line_h = 22
       local cur_x = 0
       local line_count = 1
       for i = 1, #zh_candidates do
         local w = zh_candidates[i]
-        local zh = get_cn(w)
+        local zh = ucs_mode and ucs_mode.get_cn(w) or ""
         local label = zh ~= "" and (w .. " " .. zh) or w
         local item_w = reaper.ImGui_CalcTextSize(ctx, "X " .. label) + 24
         if cur_x + item_w > win_w and cur_x > 0 then
@@ -697,7 +595,7 @@ function loop()
       cur_x = 0
       for i = #zh_candidates, 1, -1 do
         local w = zh_candidates[i]
-        local zh = get_cn(w)
+        local zh = ucs_mode and ucs_mode.get_cn(w) or ""
         local label = zh ~= "" and (w .. " " .. zh) or w
         local item_w = reaper.ImGui_CalcTextSize(ctx, "X " .. label) + 24
         if cur_x + item_w > win_w and cur_x > 0 then
@@ -882,6 +780,14 @@ function loop()
           end
         end
       end
+
+      -- 新模式结果在此显示:
+      -- local xxx_count = 0
+      -- for _ in pairs(results.xxx) do xxx_count = xxx_count + 1 end
+      -- if xxx_count > 0 then
+      --   reaper.ImGui_TextColored(ctx, 0xFFCC88FF, "XXX模式 (" .. xxx_count .. ")")
+      --   ...
+      -- end
 
       -- 复制选中词按钮
       if selected_word ~= "" then
