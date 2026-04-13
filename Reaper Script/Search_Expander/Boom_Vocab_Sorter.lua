@@ -219,9 +219,7 @@ function loop()
 
   -- 进度条
   local bar_w = reaper.ImGui_GetContentRegionAvail(ctx)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGuiCol_PlotHistogram(), 0xFF66CC66)
   reaper.ImGui_ProgressBar(ctx, pct / 100, bar_w, 0, "")
-  reaper.ImGui_PopStyleColor(ctx)
 
   reaper.ImGui_Separator(ctx)
 
@@ -236,9 +234,8 @@ function loop()
   reaper.ImGui_SameLine(ctx)
 
   -- 当前词（大号显示）
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGuiCol_Text(), is_classified and 0xFF66CC66 or (is_skipped and 0xFF888888 or 0xFFFFFFFF))
-  reaper.ImGui_Text(ctx, entry.word)
-  reaper.ImGui_PopStyleColor(ctx)
+  local word_color = is_classified and 0xFF66CC66 or (is_skipped and 0xFF888888 or 0xFFFFFFFF)
+  reaper.ImGui_TextColored(ctx, word_color, entry.word)
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_TextColored(ctx, 0xFF888888, string.format("词频:%d  desc:%d  fn:%d  tier:%s  来源:%s",
     entry.count, entry.desc_count, entry.fn_count, entry.tier, entry.source))
@@ -312,17 +309,12 @@ function loop()
         local label = string.format("%d.%s(%d)", i, cat, count)
         local btn_w = reaper.ImGui_CalcTextSize(ctx, label) + 20
         if btn_idx > 0 then reaper.ImGui_SameLine(ctx, 0, 4) end
-        -- 当前词已归此类则高亮
-        if word_category[entry.word] == cat then
-          reaper.ImGui_PushStyleColor(ctx, reaper.ImGuiCol_Button(), 0xFF446644)
-        end
-        if reaper.ImGui_Button(ctx, label, btn_w, 24) then
+        -- 当前词已归此类则用文字标记
+        local mark = (word_category[entry.word] == cat) and " *" or ""
+        if reaper.ImGui_Button(ctx, label .. mark, btn_w, 24) then
           assign_word(entry.word, cat)
           local nxt = find_next_unclassified(current_idx + 1)
           if nxt then current_idx = nxt end
-        end
-        if word_category[entry.word] == cat then
-          reaper.ImGui_PopStyleColor(ctx)
         end
         btn_idx = btn_idx + 1
         if btn_idx >= 6 then btn_idx = 0 end
