@@ -276,8 +276,7 @@ function loop()
     reaper.ImGui_TextColored(ctx, 0xFFFFAA00, "新类别名称:")
     reaper.ImGui_SameLine(ctx)
     reaper.ImGui_SetNextItemWidth(ctx, 200)
-    local changed, val = reaper.ImGui_InputText(ctx, "##newcat", new_cat_buf, 64,
-      reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+    local changed, val = reaper.ImGui_InputText(ctx, "##newcat", new_cat_buf, 64)
     if changed then new_cat_buf = val end
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_Button(ctx, "确认", 50, 22) and new_cat_buf ~= "" then
