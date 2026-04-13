@@ -1,0 +1,65 @@
+总计: 20343 条描述, 57 个文件
+
+权重分布:
+  new: 5342 条
+  mid: 7374 条
+  old: 2762 条
+
+各库统计:
+  2019 [old] 00_Creature_Foley_CK_Metadata.xls: 1494/1494
+  2025 [new] 00_Crowds_War_And_Battle_Metadata.xlsx: 1251/1251
+  2022 [mid] 00_Medieval_Melee_CK_Metadata.xlsx: 946/946
+  2021 [mid] 00_Mutate_Organic_CK.xlsx: 832/832
+  2019 [old] 00_Cinematic_Metal_Titan_CK_Metadata.xls: 700/700
+  2024 [new] 00_Alien_Life_CK_Metadata.xlsx: 693/694
+  2025 [new] 00_Magic_Alchemy_CK_Metadata.xlsx: 684/684
+  2020 [old] 00_Cyber_Weapons_CK_Metadata.xlsx: 672/1252
+  2022 [mid] 00_Creatures_Humanoid_CK_Metadata.xlsx: 658/999
+  2020 [old] 00_MAFCK_Metadata.xls: 658/658
+  2023 [mid] 00_Cannons_CK_Metadata.xlsx: 639/1141
+  2023 [mid] 00_SciFi_Momentum_Metadata_CK.xlsx: 630/630
+  2019 [old] 00_Cinematic_Strikes_CK_Metdata.xls: 618/618
+  2023 [mid] 00_Magic_Wisp_CK_Metadata.xlsx: 607/607
+  2024 [new] 00_Anime_Essentials_Metadata.xlsx: 566/566
+  2024 [new] 00_Casual_UI_CK_Metadata.xlsx: 560/560
+  2022 [mid] 00_Cinematic_Expressions_CK_Metadata.xlsx: 554/554
+  2017 [old] 00_Toons_Metadata.xls: 551/551
+  2025 [new] 00_Superheroes_Speed_and_Strength_CK_Metadata.xlsx: 549/549
+  2025 [new] 00_Violent_Combat_CK_Metadata.xlsx: 524/524
+  2023 [mid] 00_Cinematic_Motion_Metadata_CK.xlsx: 522/538
+  2018 [old] 00_CECK_Metadata.xls: 476/476
+  2017 [old] 00_MA_CK_Metadata.xls: 442/442
+  2021 [mid] 00_Toy_Guns_Metadata.xlsx: 277/373
+  ? [unknown] 00_Toolbox_Metadata.xlsx: 254/999
+  2017 [old] 00_Destruction_CK_Metadata.xls: 236/236
+  2021 [mid] 00_Brute_Force_Metadata.xlsx: 216/1052
+  2023 [mid] 00_MATTER_Metadata.xlsx: 214/999
+  2020 [old] 00_NEON_Metadata.xls: 200/200
+  2019 [old] 00_Creature_Foley_DS_Metadata.xls: 195/195
+  2022 [mid] 00_Aquatic_Predators_Metadata.xlsx: 179/179
+  2017 [old] 00_BOP_Metadata.xls: 164/164
+  2017 [old] 00_BabyBoom_Metadata.xls: 152/152
+  2022 [mid] 00_Medieval_Melee_DS_Metadata.xlsx: 145/949
+  2020 [old] 00_Cyber_Weapons_DS_Metadata.xlsx: 144/1000
+  2017 [old] 00_MA_DS_Metadata.xls: 131/131
+  2020 [old] 00_MAFDS_Metadata.xls: 124/124
+  2022 [mid] 00_Cinematic_Expressions_DS_Metadata.xlsx: 120/216
+  2017 [old] 00_Silencers_DS_Metadata.xls: 117/117
+  2021 [mid] 00_Mutate_Organic_DS.xlsx: 112/112
+  2019 [old] 00_Cinematic_Strikes_DS_Metdata.xls: 108/108
+  2023 [mid] 00_SciFi_Momentum_Metadata_DS.xlsx: 104/104
+  2025 [new] 00_Magic_Alchemy_DS_Metadata.xlsx: 101/101
+  2024 [new] 00_Casual_UI_DS_Metadata.xlsx: 100/100
+  2023 [mid] 00_Cinematic_Motion_Metadata_DS.xlsx: 100/216
+  2023 [mid] 00_Magic_Wisp_DS_Metadata.xlsx: 100/100
+  2025 [new] 00_Superheroes_Speed_and_Strength_DS_Metadata.xlsx: 100/100
+  2025 [new] 00_Violent_Combat_DS_Metadata.xlsx: 100/100
+  2019 [old] 00_Cinematic_Metal_Titan_DS_Metadata.xls: 100/100
+  2018 [old] 00_CEDS Metadata.xls: 96/96
+  2017 [old] 00_Mechanicals_DS_Metadata.xls: 96/96
+  2022 [mid] 00_Creatures_Humanoid_DS_Metadata.xlsx: 90/999
+  2020 [old] 00_Skate_Metadata.xlsx: 77/77
+  2017 [old] 00_Destruction_DS_Metadata.xls: 76/76
+  2023 [mid] 00_Cannons_DS_Metadata.xlsx: 75/75
+  2024 [new] 00_Alien_Life_DS_Metadata.xlsx: 72/694
+  2024 [new] 00_Electric_Vehicles_Metadata.xlsx: 42/42
