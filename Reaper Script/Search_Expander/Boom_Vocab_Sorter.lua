@@ -489,25 +489,25 @@ function loop()
   if not new_cat_mode then
     -- 数字键 1-9 分配到类别
     for i = 1, math.min(9, #cat_order) do
-      if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_0 + i) then
+      if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_0() + i) then
         assign_word(entry.word, cat_order[i])
         local nxt = find_next_unclassified(current_idx + 1)
         if nxt then current_idx = nxt end
       end
     end
     -- N = 新建类别
-    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_N) then
+    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_N()) then
       new_cat_mode = true
       new_cat_buf = ""
     end
     -- S = 跳过
-    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_S) then
+    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_S()) then
       skip_word(entry.word)
       local nxt = find_next_unclassified(current_idx + 1)
       if nxt then current_idx = nxt end
     end
     -- U = 取消分类
-    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_U) then
+    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_U()) then
       if is_classified then
         local cat = word_category[entry.word]
         if categories[cat] then categories[cat][entry.word] = nil end
@@ -516,22 +516,22 @@ function loop()
       end
     end
     -- R = 取消跳过
-    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_R) then
+    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_R()) then
       if is_skipped then
         skipped[entry.word] = nil
         save_skip()
       end
     end
     -- 左右箭头浏览
-    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_LeftArrow) then
+    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_LeftArrow()) then
       current_idx = math.max(1, current_idx - 1)
     end
-    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_RightArrow) then
+    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_RightArrow()) then
       current_idx = math.min(#word_pool, current_idx + 1)
     end
   else
     -- 新建类别模式下，Esc取消
-    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape) then
+    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then
       new_cat_mode = false
       new_cat_buf = ""
     end
