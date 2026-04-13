@@ -617,7 +617,7 @@ function loop()
 
     -- 中文候选词显示
     if #zh_candidates > 0 then
-      reaper.ImGui_TextColored(ctx, 0xFF88CC88, "匹配词汇（点击删除）：")
+      reaper.ImGui_TextColored(ctx, 0xFF88CC88, "匹配词汇（点击搜索 / X删除）：")
       local win_w = reaper.ImGui_GetContentRegionAvail(ctx)
       local line_h = 22
       local cur_x = 0
@@ -640,7 +640,9 @@ function loop()
       cur_x = 0
       for i = #zh_candidates, 1, -1 do
         local w = zh_candidates[i]
-        local zh = ucs_mode and ucs_mode.get_cn(w) or ""
+        if not w then goto continue_cand end
+        local zh = (ucs_mode and ucs_mode.get_cn(w)) or ""
+        if type(zh) ~= "string" then zh = "" end
         local label = zh ~= "" and (w .. " " .. zh) or w
         local item_w = reaper.ImGui_CalcTextSize(ctx, "X " .. label) + 24
         if cur_x + item_w > win_w and cur_x > 0 then
@@ -653,8 +655,12 @@ function loop()
           changed_cands = true
         end
         reaper.ImGui_SameLine(ctx, 0, 2)
-        reaper.ImGui_Text(ctx, label)
+        reaper.ImGui_SameLine(ctx, 0, 2)
+        if reaper.ImGui_SmallButton(ctx, label .. "##click" .. i) then
+          input_buf = w; prev_input = ""; zh_candidates = {}
+        end
         cur_x = cur_x + item_w
+        ::continue_cand::
       end
       reaper.ImGui_EndChild(ctx)
       if changed_cands and #zh_candidates > 0 then
