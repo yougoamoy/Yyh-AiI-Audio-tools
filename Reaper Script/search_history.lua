@@ -1,0 +1,15 @@
+return {
+  "gun",
+  "电流",
+  "gun fire",
+  "elec zap",
+  "whoosh zap",
+  "zap",
+  "sci gun",
+  "machine",
+  "gun",
+  "machine",
+  "sci gun",
+  "gun shot",
+  "sci gun",
+}

@@ -1,0 +1,5 @@
+rank1_smile=asd
+rank2_smile=
+rank3_smile=
+rank1_frown=
+empty_rank=
